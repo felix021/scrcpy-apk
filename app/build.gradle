@@ -1,0 +1,26 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 31
+    defaultConfig {
+        applicationId 'cn.felix021.scrcpy'
+        minSdkVersion 26
+        targetSdkVersion 31
+        versionCode 1
+        versionName '0.1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    sourceSets.main.assets.srcDir "$buildDir/generated/server"
+}
+
+task prepareServer(type: Exec) {
+    inputs.file '../scripts/prepare-server.sh'
+    outputs.file "$buildDir/generated/server/scrcpy-server.jar"
+    commandLine 'bash', '../scripts/prepare-server.sh', "$buildDir/generated/server"
+}
+preBuild.dependsOn prepareServer
+
+dependencies { testImplementation 'junit:junit:4.13.2' }

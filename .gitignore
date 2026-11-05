@@ -7,3 +7,5 @@ local.properties
 *.aab
 *.log
 captures/
+__pycache__/
+*.pyc

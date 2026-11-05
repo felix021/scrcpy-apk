@@ -1,0 +1,3 @@
+rootProject.name = 'scrcpy-apk'
+include ':app'
+include ':validation:probe'
