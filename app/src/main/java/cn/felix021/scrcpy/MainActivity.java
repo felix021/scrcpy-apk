@@ -12,14 +12,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.ViewConfiguration;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -28,6 +26,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.Spinner;
+import android.widget.ImageButton;
 import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -50,7 +49,11 @@ public final class MainActivity extends Activity {
     private SurfaceView surface;
     private TextView connectionStatus;
     private String errorMessage;
-    private final android.util.SparseArray<EdgeGesture> touchGestures = new android.util.SparseArray<>();
+    private RemoteInputView remoteInput;
+    private LinearLayout mirrorBody;
+    private RemoteKeyboard remoteKeyboard;
+    private ImageButton keyboardToggle;
+    private boolean keyboardVisible;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -230,45 +233,77 @@ public final class MainActivity extends Activity {
     }
 
     private void showMirror(Profile p) {
-        profile = p; touchGestures.clear(); mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
+        profile = p; keyboardVisible = false; mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
         View focus = getCurrentFocus();
         if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
-        LinearLayout statusBar = row(); statusBar.setPadding(dp(8), 0, dp(4), 0);
-        connectionStatus = label("正在连接…", 11, ACCENT); connectionStatus.setSingleLine(true);
+        mirrorBody = row(); root.addView(mirrorBody,new LinearLayout.LayoutParams(-1,0,1));
+        videoArea = new FrameLayout(this); videoArea.setBackgroundColor(Color.BLACK);
+        mirrorBody.addView(videoArea,new LinearLayout.LayoutParams(-1,0,1));
+        surface = new SurfaceView(this); surface.setContentDescription("远控屏幕");
+        videoArea.addView(surface,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
+        remoteInput = new RemoteInputView(this,new RemoteInputView.Listener() {
+            @Override public void touch(int action,long id,int x,int y,int w,int h,float pressure) {
+                if (session!=null) session.touch(action,id,x,y,w,h,pressure);
+            }
+            @Override public void navigate(EdgeGesture.Edge edge) {
+                if (session==null || p.viewOnly) return;
+                if (edge==EdgeGesture.Edge.TOP) session.expandSettings();
+                else if (edge==EdgeGesture.Edge.BOTTOM) session.key(3);
+                else session.key(4);
+            }
+        });
+        videoArea.addView(remoteInput,new FrameLayout.LayoutParams(-1,-1));
+        remoteKeyboard = new RemoteKeyboard(this,new RemoteKeyboard.Listener() {
+            @Override public void key(int code,int meta) { if(session!=null && !p.viewOnly)session.key(code,meta); }
+            @Override public void text() { inputText(); }
+            @Override public void paste() { pasteClipboard(); }
+            @Override public void close() { showKeyboard(false); }
+        });
+        remoteKeyboard.setVisibility(View.GONE);mirrorBody.addView(remoteKeyboard);
+        FrameLayout dock = new FrameLayout(this); dock.setPadding(dp(8),0,dp(8),0); add(root,dock,48);
+        connectionStatus=label("正在连接…",10,ACCENT);connectionStatus.setSingleLine(true);
         connectionStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        statusBar.addView(connectionStatus, new LinearLayout.LayoutParams(0, -2, 1));
-        if (p.showNavigation) {
-            String[] titles = {"‹", "○", "≡", "□"}, descriptions = {"Back", "Home", "Menu", "最近任务"};
-            int[] codes = {4, 3, 82, 187};
-            for (int i = 0; i < titles.length; i++) {
-                final int key = codes[i]; Button keyButton = button(titles[i], false);
-                keyButton.setTextSize(19); keyButton.setPadding(0, 0, 0, 0);
-                keyButton.setContentDescription(descriptions[i]); keyButton.setTooltipText(descriptions[i]);
-                keyButton.setEnabled(!p.viewOnly); keyButton.setAlpha(p.viewOnly ? .35f : 1);
-                keyButton.setOnClickListener(v -> { if (session != null) session.key(key); });
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(32)); lp.setMarginEnd(dp(3)); statusBar.addView(keyButton, lp);
+        connectionStatus.setGravity(Gravity.CENTER_VERTICAL);
+        dock.addView(connectionStatus,new FrameLayout.LayoutParams(dp(90),-1,Gravity.START|Gravity.CENTER_VERTICAL));
+        LinearLayout navigation=row();navigation.setGravity(Gravity.CENTER);
+        if(p.showNavigation) {
+            int[] icons={R.drawable.ic_back,R.drawable.ic_home,R.drawable.ic_recents}, codes={4,3,187};
+            String[] names={"Back","Home","最近任务"};
+            for(int i=0;i<icons.length;i++) {
+                final int code=codes[i];ImageButton key=iconButton(icons[i],names[i]);
+                key.setEnabled(!p.viewOnly);key.setAlpha(p.viewOnly?.35f:1);
+                key.setOnClickListener(v -> {if(session!=null)session.key(code);});
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(48),dp(44));
+                if(i<2)lp.setMarginEnd(dp(4));navigation.addView(key,lp);
             }
         }
-        Button exit = button("断开", false); exit.setTextSize(11); exit.setPadding(0, 0, 0, 0);
-        statusBar.addView(exit, new LinearLayout.LayoutParams(dp(46), dp(32)));
-        exit.setOnClickListener(v -> disconnect(null)); add(root, statusBar, 36);
-        videoArea = new FrameLayout(this); videoArea.setBackgroundColor(Color.BLACK);
-        root.addView(videoArea, new LinearLayout.LayoutParams(-1, 0, 1));
-        surface = new SurfaceView(this); surface.setContentDescription("远控屏幕");
-        videoArea.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
-        videoArea.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitVideo());
-        surface.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> excludeLocalBackGestures());
-        surface.setOnTouchListener((v, e) -> touch(e));
+        dock.addView(navigation,new FrameLayout.LayoutParams(-2,-1,Gravity.CENTER));
+        LinearLayout actions=row();
+        keyboardToggle=iconButton(R.drawable.ic_keyboard,"虚拟键盘");keyboardToggle.setEnabled(!p.viewOnly);
+        keyboardToggle.setAlpha(p.viewOnly?.35f:1);keyboardToggle.setOnClickListener(v -> showKeyboard(!keyboardVisible));
+        actions.addView(keyboardToggle,new LinearLayout.LayoutParams(dp(36),dp(44)));
+        Button exit=button("断开",false);exit.setTextSize(11);exit.setPadding(0,0,0,0);
+        actions.addView(exit,new LinearLayout.LayoutParams(dp(40),dp(44)));
+        exit.setOnClickListener(v -> disconnect(null));
+        dock.addView(actions,new FrameLayout.LayoutParams(-2,-1,Gravity.END|Gravity.CENTER_VERTICAL));
+        dock.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+            FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)connectionStatus.getLayoutParams();
+            int width=Math.max(dp(30),(r-l-(p.showNavigation?dp(152):0))/2-dp(8));
+            if(lp.width!=width){lp.width=width;connectionStatus.setLayoutParams(lp);}
+        });
+        videoArea.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> fitVideo());
+        surface.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> updateInputFrame());
+        remoteInput.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> excludeLocalBackGestures());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left = 0, right = 0, top = 0, bottom;
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets mandatory = insets.getInsetsIgnoringVisibility(WindowInsets.Type.mandatorySystemGestures());
-                android.graphics.Insets navigation = insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars());
+                android.graphics.Insets navInsets = insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars());
                 android.graphics.Insets gestures = insets.getInsetsIgnoringVisibility(WindowInsets.Type.systemGestures());
-                left = Math.max(mandatory.left, navigation.left); right = Math.max(mandatory.right, navigation.right);
-                bottom = Math.max(Math.max(mandatory.bottom, navigation.bottom), gestures.bottom);
+                left = Math.max(mandatory.left, navInsets.left); right = Math.max(mandatory.right, navInsets.right);
+                bottom = Math.max(Math.max(mandatory.bottom, navInsets.bottom), gestures.bottom);
                 top = gestures.top;
             } else {
                 left = insets.getStableInsetLeft(); right = insets.getStableInsetRight();
@@ -280,35 +315,14 @@ public final class MainActivity extends Activity {
                 top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
                 bottom = Math.max(bottom, insets.getDisplayCutout().getSafeInsetBottom());
             }
-            // The status strip protects the video from the top mandatory region;
-            // only the bottom safe area is reserved beneath the video.
-            root.setPadding(left, 0, right, bottom);
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) statusBar.getLayoutParams();
-            int barHeight = Math.max(dp(36), top);
-            int barLeft = dp(8), barRight = dp(4), barTop = 0;
-            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null && insets.getDisplayCutout().getSafeInsetTop() > 0) {
-                int blockedLeft = 0, blockedRight = 0;
-                int width = root.getWidth();
-                for (Rect hole : insets.getDisplayCutout().getBoundingRects()) {
-                    if (hole.top >= insets.getDisplayCutout().getSafeInsetTop()) continue;
-                    if (hole.centerX() < width / 2) blockedLeft = Math.max(blockedLeft, hole.right);
-                    else blockedRight = Math.max(blockedRight, width - hole.left);
-                }
-                if (width - left - right - blockedLeft - blockedRight >= dp(p.showNavigation ? 285 : 140)) {
-                    barLeft = Math.max(barLeft, blockedLeft + dp(4)); barRight = Math.max(barRight, blockedRight + dp(4));
-                } else {
-                    barTop = insets.getDisplayCutout().getSafeInsetTop(); barHeight = barTop + dp(36);
-                }
-            }
-            statusBar.setPadding(barLeft, barTop, barRight, 0);
-            if (lp.height != barHeight) { lp.height = barHeight; statusBar.setLayoutParams(lp); }
-            surface.post(this::excludeLocalBackGestures);
+            root.setPadding(left,top,right,bottom);
+            remoteInput.post(this::excludeLocalBackGestures);
             return insets;
         });
         root.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> {
-            if (r - l != or - ol) view.post(view::requestApplyInsets);
+            if (r-l!=or-ol || b-t!=ob-ot) {view.post(view::requestApplyInsets);view.post(this::updateMirrorLayout);}
         });
-        enterRemoteFullscreen(); root.requestApplyInsets();
+        updateMirrorLayout();enterRemoteFullscreen(); root.requestApplyInsets();
         surface.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder holder) {
                 if (token != generation || session != null) return;
@@ -332,39 +346,57 @@ public final class MainActivity extends Activity {
         int w = Math.max(1, Math.round(videoWidth * scale)), h = Math.max(1, Math.round(videoHeight * scale));
         FrameLayout.LayoutParams old = (FrameLayout.LayoutParams) surface.getLayoutParams();
         if (old.width != w || old.height != h) surface.setLayoutParams(new FrameLayout.LayoutParams(w, h, Gravity.CENTER));
-        surface.post(this::excludeLocalBackGestures);
+        surface.post(this::updateInputFrame);
     }
-    private boolean touch(MotionEvent e) {
-        if (session == null || profile.viewOnly || videoWidth == 0) return true;
-        int action = e.getActionMasked(), index = e.getActionIndex();
-        if (action == MotionEvent.ACTION_CANCEL) android.util.Log.d("RemoteGesture", "CANCEL");
-        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (action == MotionEvent.ACTION_DOWN) touchGestures.clear();
-            EdgeGesture gesture = new EdgeGesture();
-            gesture.begin(e.getX(index), e.getY(index), surface.getWidth(), surface.getHeight(), dp(8));
-            touchGestures.put(e.getPointerId(index), gesture);
-        } else if (action == MotionEvent.ACTION_MOVE) {
-            for (int i = 0; i < e.getPointerCount(); i++) {
-                EdgeGesture gesture = touchGestures.get(e.getPointerId(i));
-                if (gesture == null) continue;
-                EdgeGesture.Edge edge = gesture.recognize(e.getX(i), e.getY(i), ViewConfiguration.get(this).getScaledTouchSlop());
-                if (edge != EdgeGesture.Edge.NONE) android.util.Log.d("RemoteGesture", edge.name());
-            }
-        }
-        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_CANCEL) {
-            for (int i = 0; i < e.getPointerCount(); i++) sendTouch(e, i, action == MotionEvent.ACTION_CANCEL ? MotionEvent.ACTION_UP : action);
-        } else if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) sendTouch(e, index, MotionEvent.ACTION_DOWN);
-        else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) sendTouch(e, index, MotionEvent.ACTION_UP);
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) touchGestures.clear();
-        else if (action == MotionEvent.ACTION_POINTER_UP) touchGestures.remove(e.getPointerId(index));
-        return true;
+    private ImageButton iconButton(int drawable,String description) {
+        ImageButton button=new ImageButton(this);button.setImageResource(drawable);
+        button.setContentDescription(description);button.setTooltipText(description);button.setPadding(dp(10),dp(9),dp(10),dp(9));
+        button.setBackground(background(0xff17232d,8));return button;
     }
-    private void sendTouch(MotionEvent e, int index, int action) {
-        EdgeGesture gesture = touchGestures.get(e.getPointerId(index));
-        if (gesture == null) return;
-        int x = gesture.x(e.getX(index), surface.getWidth(), videoWidth);
-        int y = gesture.y(e.getY(index), surface.getHeight(), videoHeight);
-        session.touch(action, e.getPointerId(index), x, y, videoWidth, videoHeight, action == MotionEvent.ACTION_UP ? 0 : e.getPressure(index));
+    private void updateInputFrame() {
+        if(mirroring && remoteInput!=null)remoteInput.updateFrame(new Rect(surface.getLeft(),surface.getTop(),surface.getRight(),surface.getBottom()),videoWidth,videoHeight,!profile.viewOnly);
+    }
+    private void updateMirrorLayout() {
+        if(!mirroring || mirrorBody==null) return;
+        boolean side=keyboardVisible && getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
+        mirrorBody.setOrientation(side?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams vp=(LinearLayout.LayoutParams)videoArea.getLayoutParams();
+        int w=side?0:-1,h=side?-1:0;
+        if(vp.width!=w || vp.height!=h){vp.width=w;vp.height=h;vp.weight=1;videoArea.setLayoutParams(vp);}
+        int keyboardWidth=side?Math.min(dp(420),Math.round(mirrorBody.getWidth()*.48f)):-1;
+        LinearLayout.LayoutParams kp=(LinearLayout.LayoutParams)remoteKeyboard.getLayoutParams();
+        int keyboardHeight=side?-1:-2;
+        if(kp.width!=keyboardWidth || kp.height!=keyboardHeight){kp.width=keyboardWidth;kp.height=keyboardHeight;remoteKeyboard.setLayoutParams(kp);}
+        remoteKeyboard.setFillHeight(side);videoArea.post(this::fitVideo);
+    }
+    private void showKeyboard(boolean visible) {
+        if(!mirroring || profile.viewOnly)return;
+        remoteInput.cancel();keyboardVisible=visible;
+        if(!visible)remoteKeyboard.reset();
+        remoteKeyboard.setVisibility(visible?View.VISIBLE:View.GONE);keyboardToggle.setSelected(visible);
+        keyboardToggle.setBackground(background(visible?0xff34594e:0xff17232d,8));updateMirrorLayout();
+    }
+    private void inputText() {
+        if(!mirroring || profile.viewOnly)return;
+        EditText editor=new EditText(this);editor.setTextColor(TEXT);editor.setMinLines(2);editor.setMaxLines(6);
+        editor.setHint("输入要发送到远端的文字");editor.setContentDescription("发送文本");
+        editor.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("输入文字").setView(editor).setNegativeButton("取消",null).setPositiveButton("发送",null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                if(session!=null)session.paste(editor.getText().toString());
+                ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(editor.getWindowToken(),0);
+                dialog.dismiss();
+            } catch(IllegalArgumentException e){editor.setError(e.getMessage());}
+        }));dialog.show();
+    }
+    private void pasteClipboard() {
+        if(!mirroring || session==null || profile.viewOnly)return;
+        android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+        android.content.ClipData clip=clipboard.getPrimaryClip();
+        if(clip==null || clip.getItemCount()==0){toast("剪贴板为空");return;}
+        try {session.paste(clip.getItemAt(0).coerceToText(this).toString());}
+        catch(IllegalArgumentException e){toast(e.getMessage());}
     }
     private void enterRemoteFullscreen() {
         if (Build.VERSION.SDK_INT >= 28) {
@@ -385,10 +417,10 @@ public final class MainActivity extends Activity {
         }
     }
     private void excludeLocalBackGestures() {
-        if (Build.VERSION.SDK_INT >= 29 && mirroring && surface.getWidth() > 0) {
+        if (Build.VERSION.SDK_INT >= 29 && mirroring && remoteInput!=null && remoteInput.getWidth() > 0) {
             // Full-height exclusion is permitted while navigation bars are hidden
             // with transient-by-swipe behavior. Mandatory top/bottom zones remain local.
-            surface.setSystemGestureExclusionRects(java.util.Collections.singletonList(new Rect(0, 0, surface.getWidth(), surface.getHeight())));
+            remoteInput.setSystemGestureExclusionRects(java.util.Collections.singletonList(new Rect(0,0,remoteInput.getWidth(),remoteInput.getHeight())));
         }
     }
     @Override public void onWindowFocusChanged(boolean focus) {
@@ -396,11 +428,13 @@ public final class MainActivity extends Activity {
         if (focus && mirroring) enterRemoteFullscreen();
     }
     private void disconnect(String error) {
-        generation++; mirroring = false; touchGestures.clear();
-        ScrcpySession s = session; session = null; if (s != null) s.close();
+        if(remoteInput!=null)remoteInput.cancel();
+        if(remoteKeyboard!=null)remoteKeyboard.reset();
+        generation++; mirroring=false;keyboardVisible=false;
+        ScrcpySession s = session; session = null; if (s != null) s.closeGracefully();
         errorMessage = error; showForm();
     }
-    @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); if (mirroring) videoArea.post(this::fitVideo); }
+    @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); if(mirroring){remoteInput.cancel();remoteKeyboard.reset();mirrorBody.post(this::updateMirrorLayout);} }
     @Override protected void onStop() { super.onStop(); if (mirroring) disconnect("已离开远控界面，连接已断开"); }
     @Override protected void onDestroy() { if (session != null) session.close(); super.onDestroy(); }
     @Override public void onBackPressed() {

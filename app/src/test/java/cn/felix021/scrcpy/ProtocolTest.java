@@ -16,4 +16,21 @@ public class ProtocolTest {
         assertEquals(720,b.getShort() & 65535); assertEquals(1600,b.getShort() & 65535);
         assertEquals(32768,b.getShort() & 65535); assertEquals(0,b.getInt()); assertEquals(0,b.getInt());
     }
+    @Test public void controlShiftChordPreservesOrderingAndReleasesInReverse() {
+        ByteBuffer b=ByteBuffer.wrap(Protocol.chord(31,0x3041));
+        int[] actions={0,0,0,1,1,1},codes={113,59,31,31,59,113},metas={0x3000,0x3041,0x3041,0x3041,0x3000,0};
+        assertEquals(84,b.remaining());
+        for(int i=0;i<codes.length;i++) {
+            assertEquals(0,b.get());assertEquals(actions[i],b.get());assertEquals(codes[i],b.getInt());
+            assertEquals(0,b.getInt());assertEquals(metas[i],b.getInt());
+        }
+    }
+    @Test public void pasteUsesUtf8ByteLengthAndClipboardPasteFlag() {
+        String text="你好🙂";byte[] bytes=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ByteBuffer b=ByteBuffer.wrap(Protocol.paste(text));assertEquals(9,b.get());assertEquals(0,b.getLong());
+        assertEquals(1,b.get());assertEquals(bytes.length,b.getInt());byte[] value=new byte[b.remaining()];b.get(value);assertArrayEquals(bytes,value);
+    }
+    @Test(expected=IllegalArgumentException.class) public void pasteIsBounded() {
+        char[] chars=new char[65537];java.util.Arrays.fill(chars,'x');Protocol.paste(new String(chars));
+    }
 }

@@ -20,6 +20,7 @@ public final class ProbeActivity extends Activity {
     }
     private void show(String event) { text.setText("scrcpy validation\n" + event); Log.i("ScrcpyProbe", event); }
     @Override public boolean onTouchEvent(MotionEvent e) {
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN) Log.i("ScrcpyProbe", "TOUCH_DOWN");
         if (e.getActionMasked() == MotionEvent.ACTION_UP) show("TOUCH " + ++touches + " " + (int)e.getX() + "," + (int)e.getY());
         if (e.getPointerCount() > 1) show("MULTITOUCH " + e.getPointerCount());
         return true;

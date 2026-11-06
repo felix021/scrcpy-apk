@@ -4,6 +4,7 @@ import argparse
 import sys
 import json
 import re
+import shlex
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -14,8 +15,8 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui'], default='all',
-               help='Run core, lifecycle, or compact-UI/Back/four-edge-gesture checks')
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard'], default='all',
+               help='Run core, lifecycle, compact UI, controls, or keyboard-only checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
@@ -144,6 +145,7 @@ def connect():
 
 
 def start_probe():
+    shell(a.target,'cmd','statusbar','collapse')
     shell(a.target, 'am', 'force-stop', PROBE)
     shell(a.target, 'am', 'start', '-W', '-n', PROBE + '/.ProbeActivity')
     time.sleep(.5)
@@ -181,7 +183,7 @@ def verify_ui():
         shell(a.client,'input','swipe',*gestures[edge],400)
         time.sleep(.5)
         current = adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S')
-        assert current.count(' '+edge) > previous.count(' '+edge), f'{edge} gesture did not reach the video surface'
+        assert current.count('EDGE_ACTION_'+edge) > previous.count('EDGE_ACTION_'+edge), f'{edge} gesture did not reach the video surface'
         assert current.count('LOCAL_BACK_FORWARD') == previous.count('LOCAL_BACK_FORWARD'), 'Local Back substituted for a remote swipe'
         assert current.count('CANCEL') == previous.count('CANCEL'), 'Local system intercepted and cancelled the swipe'
         stay_connected()
@@ -219,11 +221,11 @@ def verify_ui():
     tap('展示虚拟按键')
     connect()
     root = dump()
-    assert all(find(desc=name,root=root) is None for name in ['Back','Home','Menu','最近任务'])
+    assert all(find(desc=name,root=root) is None for name in ['Back','Home','最近任务'])
     x1,y1,x2,y2 = bounds(find(desc='远控屏幕',root=root))
-    assert y2-y1 > 2340*.88, 'Video does not use available height'
+    assert y2-y1 > 2340*.8, 'Video does not use available height'
     screenshot('09-gesture-only')
-    record('virtual keys hidden and video fills height above bottom safe area')
+    record('virtual keys hidden and video fills height above bottom row and safe area')
     start_probe(); target_in_probe(); adb(a.target,'logcat','-c')
     before_back = adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S').count('LOCAL_BACK_FORWARD')
     shell(a.client,'input','keyevent','KEYCODE_BACK')
@@ -235,7 +237,7 @@ def verify_ui():
     windows = shell(a.target,'dumpsys','window')
     assert re.search(r'mCurrentFocus=.*(NotificationShade|StatusBar)',windows,re.I), 'Remote shade did not open'
     screenshot('10-top-swipe')
-    record('video top-down swipe opens remote notification shade')
+    record('video top-down swipe opens remote quick settings')
     shell(a.target,'cmd','statusbar','collapse')
     start_probe(); target_in_probe()
     swipe('BOTTOM')
@@ -252,7 +254,7 @@ def verify_ui():
     assert find(text='展示虚拟按键').get('checked') == 'false'
     tap('展示虚拟按键'); connect()
     root = dump()
-    assert all(find(desc=name,root=root) is not None for name in ['Back','Home','Menu','最近任务'])
+    assert all(find(desc=name,root=root) is not None for name in ['Back','Home','最近任务'])
     screenshot('11-compact-status-bar')
     record('virtual-key preference persists and keys can be restored')
     shell(a.client,'settings','put','system','accelerometer_rotation',0)
@@ -266,6 +268,162 @@ def verify_ui():
     screenshot('12-landscape-safe-area')
     record('landscape recomputes safe areas without losing connection')
     tap('断开')
+
+
+def verify_controls():
+    def bounds(node):
+        assert node is not None, 'UI element missing'
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    def key(desc):
+        click(find(desc=desc))
+    def rotate(serial, rotation):
+        shell(serial,'settings','put','system','accelerometer_rotation',0)
+        shell(serial,'settings','put','system','user_rotation',rotation)
+        time.sleep(1)
+    def input_logs():
+        return adb(a.target,'logcat','-d','-s','ScrcpyInput:I','*:S')
+    def target_tree():
+        output=shell(a.target,'uiautomator','dump','/sdcard/scrcpy-validation.xml')
+        assert 'dumped to:' in output
+        return ET.fromstring(shell(a.target,'cat','/sdcard/scrcpy-validation.xml'))
+    def expect_text(value):
+        root=target_tree()
+        node=find(desc='验证输入框',root=root)
+        assert node is not None and node.get('text')==value, 'Remote text differs: '+str(node.attrib if node is not None else None)
+    def wait_video_shape(landscape):
+        end=time.monotonic()+15
+        while time.monotonic()<end:
+            l,t,r,b=bounds(find(desc='远控屏幕'))
+            if ((r-l)>(b-t))==landscape:return
+        raise AssertionError('Remote rotation did not reach displayed video')
+    def gesture(edge, outside=False, duration=250):
+        root=dump(); l,t,r,b=bounds(find(desc='远控屏幕',root=root))
+        ol,ot,orr,ob=bounds(find(desc='远控触控区',root=root))
+        # Cross the displayed remote boundary from its black letterbox when present.
+        d=-8 if outside else 2
+        points={'LEFT':(l+d,t+(b-t)//3,l+(r-l)//2,t+(b-t)//3),
+                'RIGHT':(r-d-1,t+(b-t)//3,l+(r-l)//2,t+(b-t)//3),
+                'TOP':(l+(r-l)//2,t+d,l+(r-l)//2,t+(b-t)//2),
+                'BOTTOM':(l+(r-l)//2,b-d-1,l+(r-l)//2,t+(b-t)//2)}
+        x,y,xx,yy=points[edge]
+        assert ol<=x<orr and ot<=y<ob, ('No letterbox for gesture',edge,(l,t,r,b),(ol,ot,orr,ob))
+        before=adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S')
+        shell(a.client,'input','swipe',x,y,xx,yy,duration)
+        time.sleep(.5)
+        after=adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S')
+        for marker in ['LOCAL_BACK_FORWARD','CANCEL']:
+            assert after.count(marker)==before.count(marker), marker+' intercepted edge action'
+        assert after.count('EDGE_ACTION_'+edge)>before.count('EDGE_ACTION_'+edge), edge+' action missing'
+        assert find(text='断开') is not None
+    overlays=shell(a.target,'cmd','overlay','list')
+    nav=next((line.split()[-1] for line in overlays.splitlines() if line.startswith('[x]') and '.navbar.' in line),None)
+    try:
+        # Target three-button navigation proves actions don't depend on its swipe setup.
+        shell(a.target,'cmd','overlay','enable-exclusive','--category','com.android.internal.systemui.navbar.threebutton')
+        rotate(a.client,0); rotate(a.target,0)
+        tap('省流'); connect()
+        root=dump()
+        n=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务']]
+        status=next(node for node in root.iter('node') if '已连接' in node.get('text',''))
+        exit_bounds=bounds(find(text='断开',root=root))
+        assert len({v[1] for v in n})==1 and all(abs((v[1]+v[3])//2-(exit_bounds[1]+exit_bounds[3])//2)<12 for v in n)
+        assert bounds(status)[2]<=n[0][0] and exit_bounds[0]>=n[-1][2]
+        screenshot('13-bottom-navigation')
+        record('three navigation buttons centered in bottom row, status left and disconnect right')
+        if a.phase == 'controls':
+            start_probe(); adb(a.target,'logcat','-c')
+            l,t,r,b=bounds(find(desc='远控屏幕'))
+            shell(a.client,'input','swipe',(l+r)//2,t+(b-t)//3,(l+r)//2,t+(b-t)*2//3,300)
+            assert_log('TOUCH_DOWN'); assert_log('TOUCH 1')
+            record('ordinary video drag retains remote DOWN and UP')
+            for edge in ['LEFT','RIGHT']:
+                start_probe(); adb(a.target,'logcat','-c')
+                gesture(edge,True)
+                assert PROBE not in next(line for line in resumed().splitlines() if 'topResumedActivity=' in line)
+                assert 'TOUCH' not in logs(), 'Edge navigation leaked raw touch'
+                record(edge.lower()+' letterbox-to-video gesture performs remote Back in three-button mode')
+            start_probe();gesture('LEFT',False,1000)
+            assert PROBE not in next(line for line in resumed().splitlines() if 'topResumedActivity=' in line)
+            record('slow inward swipe remains eligible after tap timeout')
+            start_probe();rotate(a.target,1);wait_video_shape(True)
+            gesture('TOP',True)
+            shade=target_tree()
+            texts=' '.join(n.get('text','')+' '+n.get('content-desc','') for n in shade.iter('node'))
+            assert 'Display brightness' in texts and 'Edit order of settings' in texts and 'Power menu' in texts, 'Quick settings not expanded: '+texts
+            screenshot('14-control-center')
+            shell(a.target,'cmd','statusbar','collapse'); start_probe()
+            gesture('BOTTOM',True)
+            assert 'launcher' in next(line for line in resumed().splitlines() if 'topResumedActivity=' in line).lower()
+            record('top and bottom letterbox gestures expand quick settings and return Home')
+            start_probe();rotate(a.target,0);wait_video_shape(False);adb(a.target,'logcat','-c')
+            root=dump();l,t,r,b=bounds(find(desc='远控屏幕',root=root));ol,ot,orr,ob=bounds(find(desc='远控触控区',root=root))
+            shell(a.client,'input','tap',(ol+l)//2,(t+b)//2)
+            assert 'TOUCH ' not in logs()
+            record('black letterbox taps do not become remote edge touches')
+            shell(a.client,'input','keyevent',4); assert_log('BACK 4')
+            assert find(text='断开') is not None
+            record('local Back still reaches target and keeps session connected')
+        shell(a.target,'cmd','statusbar','collapse')
+        shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
+        key('虚拟键盘')
+        for char in 'hello': key('字符 '+char)
+        key('Shift');key('字符 A')
+        key('Caps Lock');key('字符 B');key('Shift');key('字符 c');key('Caps Lock')
+        expect_text('helloABc')
+        key('Ctrl');key('字符 a');key('字符 b');expect_text('b')
+        record('full keyboard, Shift, Caps+Shift and one-shot Ctrl+A edit remote text')
+        l,t,r,b=bounds(find(desc='Ctrl'))
+        shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,(l+r)//2,(t+b)//2,700)
+        key('字符 a');key('字符 c')
+        assert find(desc='Ctrl').get('selected')=='true', 'Locked Ctrl lost its state'
+        key('Ctrl');key('字符 b');expect_text('b')
+        record('long press locks Ctrl across multiple keys and tap unlocks it')
+        key('Shift');key('字符 <');expect_text('b<')
+        key('切换符号');key('Shift');key('字符 {');expect_text('b<{')
+        key('切换符号')
+        key('Fn');key('F1');key('Fn');key('F11');key('Fn');key('Home')
+        remote_logs=input_logs()
+        assert all('KEY '+str(code)+' META ' in remote_logs for code in [131,141,122])
+        key('Alt');key('Left')
+        assert any(int(meta)&0x12==0x12 for meta in re.findall(r'KEY 21 META (\d+)',input_logs())), 'Alt modifier missing'
+        record('shifted punctuation, Fn function/navigation keys and Alt modifier reach remote')
+        screenshot('15-keyboard-portrait')
+        key('Ctrl');key('字符 a');key('输入文字')
+        helper='/data/local/tmp/scrcpy-validation.apk'
+        adb(a.client,'push',ROOT/'validation/probe/build/outputs/apk/debug/probe-debug.apk',helper)
+        value='中文输入🙂 ' + '0123456789'*600
+        command='CLASSPATH='+helper+' app_process / '+PROBE+'.SetText '+shlex.quote('发送文本')+' '+shlex.quote(value)
+        output=shell(a.client,command)
+        assert 'Exception' not in output, output
+        tap('发送');expect_text(value)
+        shell(a.client,'rm',helper)
+        record('Unicode and 6 KB text dialog paste survives ADB packet fragmentation')
+        l,t,r,b=bounds(find(desc='Backspace'))
+        shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,(l+r)//2,(t+b)//2,800)
+        short=find(desc='验证输入框',root=target_tree()).get('text')
+        assert value.startswith(short) and len(value)-50<len(short)<len(value)
+        time.sleep(.3);expect_text(short)
+        record('held Backspace repeats and stops when released')
+        rotate(a.client,1)
+        root=wait_connected();v=bounds(find(desc='远控屏幕',root=root));k=bounds(find(desc='完整虚拟键盘',root=root))
+        assert v[2]<=k[0] and v[2]>v[0] and k[3]>k[1], (v,k)
+        key('Ctrl');key('字符 a');key('字符 x');expect_text('x')
+        screenshot('16-keyboard-landscape')
+        record('landscape keyboard sits beside video and remains usable without reconnecting')
+        key('收起键盘');rotate(a.target,1);wait_video_shape(True)
+        root=wait_connected();v=bounds(find(desc='远控屏幕',root=root))
+        assert v[2]-v[0]>v[3]-v[1]
+        screenshot('17-both-landscape')
+        record('both devices landscape: aspect ratio, safe areas and bottom row retained')
+        tap('断开');rotate(a.client,0);rotate(a.target,0);bottom();tap('展示虚拟按键');connect()
+        root=dump();assert all(find(desc=d,root=root) is None for d in ['Back','Home','最近任务'])
+        assert find(desc='虚拟键盘',root=root) is not None
+        start_probe();gesture('LEFT',True)
+        assert PROBE not in next(line for line in resumed().splitlines() if 'topResumedActivity=' in line)
+        tap('断开');bottom();tap('展示虚拟按键')
+        record('navigation can be hidden while full keyboard and edge actions remain available')
+    finally:
+        if nav:shell(a.target,'cmd','overlay','enable-exclusive','--category',nav)
 
 
 try:
@@ -287,6 +445,9 @@ try:
         sys.exit(0)
     if find(text='展示虚拟按键').get('checked') == 'false':
         tap('展示虚拟按键')
+    if a.phase in ['controls','keyboard']:
+        verify_controls()
+        sys.exit(0)
     if a.phase == 'all':
         tap('省流')
         edit('最长边 · px', '1280')
@@ -322,7 +483,7 @@ try:
         shell(a.client, 'input', 'tap', 540, 1120)
         assert_log('TOUCH 1')
         record('remote touch injection')
-        click(find(desc='Menu'))
+        click(find(desc='虚拟键盘')); click(find(desc='Fn')); click(find(desc='菜单键')); click(find(desc='收起键盘'))
         assert_log('MENU 82')
         screenshot('03-menu')
         record('Menu virtual key reaches remote as KEYCODE_MENU 82')
@@ -380,7 +541,7 @@ try:
         adb(a.target, 'logcat', '-c')
         shell(a.client, 'input', 'tap', 540, 1120)
         assert 'TOUCH ' not in logs()
-        for title in ['Back', 'Home', 'Menu', '最近任务']:
+        for title in ['Back', 'Home', '最近任务']:
             assert find(desc=title).get('enabled') == 'false'
         record('view-only blocks touch and disables virtual keys')
         tap('断开')
@@ -399,7 +560,16 @@ try:
         edit('最长边 · px', '1280')
     tap('连接设备   →')
     wait_connected()
+    if a.phase == 'lifecycle':
+        start_probe();adb(a.target,'logcat','-c')
+        node=find(desc='远控屏幕')
+        l,t,r,b=map(int,re.findall(r'\d+',node.get('bounds')))
+        shell(a.client,'input','motionevent','DOWN',(l+r)//2,(t+b)//2)
+        assert_log('TOUCH_DOWN')
     shell(a.client, 'input', 'keyevent', 'KEYCODE_HOME')
+    if a.phase == 'lifecycle':
+        assert_log('TOUCH 1')
+        record('backgrounding releases the active remote touch before closing ADB')
     # HOME animation must finish before bringing the same task forward again.
     time.sleep(1.5)
     assert 'launcher' in next(line for line in shell(a.client, 'dumpsys', 'activity', 'activities').splitlines() if 'topResumedActivity=' in line).lower()
@@ -447,6 +617,8 @@ finally:
         except (subprocess.SubprocessError, OSError) as e:
             print('Cleanup pending (device unavailable):', serial, key, e, flush=True)
     try:
+        shell(a.target,'cmd','statusbar','collapse')
+        shell(a.client,'rm','-f','/data/local/tmp/scrcpy-validation.apk')
         shell(a.target, 'am', 'force-stop', PROBE)
         adb(a.target, 'uninstall', PROBE)
     except (subprocess.SubprocessError, OSError) as e:

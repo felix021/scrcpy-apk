@@ -40,6 +40,8 @@ final class ScrcpySession {
     private final Surface surface;
     private final Listener listener;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean gracefulClosing = new AtomicBoolean();
+    private static final byte[] END_CONTROLS = new byte[0];
     private final AtomicBoolean rendered = new AtomicBoolean();
     private final ArrayBlockingQueue<byte[]> controls = new ArrayBlockingQueue<>(256);
     private volatile Thread controlWriter;
@@ -119,12 +121,23 @@ final class ScrcpySession {
                     try {
                         while (!closed.get()) {
                             java.io.ByteArrayOutputStream batch = new java.io.ByteArrayOutputStream();
-                            batch.write(controls.take());
+                            byte[] first=controls.take();
+                            if(first==END_CONTROLS){control.awaitWriteComplete(500);close();return;}
+                            batch.write(first);
                             // ADB requires an ACK per WRTE. Batch all currently queued
                             // events so latency does not limit controls to 1 event / RTT.
                             byte[] next;
-                            for (int i = 1; i < 128 && (next = controls.poll()) != null; i++) batch.write(next);
-                            control.write(batch.toByteArray());
+                            for (int i=1;i<128;i++) {
+                                next=controls.peek();
+                                if(next==null || next==END_CONTROLS || batch.size()+next.length>65536)break;
+                                next=controls.poll();if(next==null)break;batch.write(next);
+                            }
+                            byte[] bytes = batch.toByteArray();
+                            // Clipboard packets may be larger than an ADB WRTE. The
+                            // control stream is byte-oriented; preserve order across chunks.
+                            for (int offset = 0; offset < bytes.length; offset += 4096) {
+                                control.write(java.util.Arrays.copyOfRange(bytes, offset, Math.min(offset + 4096, bytes.length)));
+                            }
                         }
                     } catch (Exception e) { if (!closed.get()) fail("发送控制操作失败"); }
                 }, "scrcpy-control-writer");
@@ -161,9 +174,9 @@ final class ScrcpySession {
                 decoder.feed(packet, config ? 0 : ptsFlags & ((1L << 61) - 1), config);
             }
         } catch (Exception e) {
-            if (!closed.get()) { Log.e("ScrcpySession", "Session failed: " + serverLog, e); fail(e.getMessage() == null ? e.toString() : e.getMessage()); }
+            if (!closed.get() && !gracefulClosing.get()) { Log.e("ScrcpySession", "Session failed: " + serverLog, e); fail(e.getMessage() == null ? e.toString() : e.getMessage()); }
         } finally {
-            close();
+            if(!gracefulClosing.get())close();
             Decoder d = decoder;
             if (d != null) d.close();
         }
@@ -208,17 +221,27 @@ final class ScrcpySession {
         });
     }
 
-    void key(int keycode) { send(Protocol.key(0, keycode)); send(Protocol.key(1, keycode)); }
+    void key(int keycode) { send(Protocol.chord(keycode, 0)); }
+    void key(int keycode, int metaState) { send(Protocol.chord(keycode, metaState)); }
+    void paste(String text) { send(Protocol.paste(text)); }
+    void expandSettings() { send(new byte[]{6}); }
     void touch(int action, long pointer, int x, int y, int w, int h, float pressure) {
         send(Protocol.touch(action, pointer, x, y, w, h, pressure));
     }
     private void send(byte[] bytes) {
-        if (profile.viewOnly || closed.get() || control == null) return;
+        if (profile.viewOnly || closed.get() || gracefulClosing.get() || control == null) return;
         if (!controls.offer(bytes) && !closed.get()) fail("控制连接拥塞，请重新连接");
     }
 
     private void checkOpen() throws IOException { if (closed.get()) throw new IOException("连接已取消"); }
     private void fail(String message) { if (close()) listener.error(message); }
+
+    void closeGracefully() {
+        if(closed.get() || !gracefulClosing.compareAndSet(false,true))return;
+        if(control==null || !controls.offer(END_CONTROLS)){close();return;}
+        try {timer.schedule(this::close,750,TimeUnit.MILLISECONDS);}
+        catch(java.util.concurrent.RejectedExecutionException e){close();}
+    }
 
     boolean close() {
         if (!closed.compareAndSet(false, true)) return false;
@@ -249,7 +272,7 @@ final class ScrcpySession {
             output = new Thread(() -> {
                 MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
                 try {
-                    while (!stopped && !closed.get()) {
+                    while (!stopped && !closed.get() && !gracefulClosing.get()) {
                         int index = codec.dequeueOutputBuffer(info, 10000);
                         if (index >= 0) {
                             codec.releaseOutputBuffer(index, true);
@@ -258,7 +281,7 @@ final class ScrcpySession {
                             }
                         }
                     }
-                } catch (RuntimeException e) { if (!stopped && !closed.get()) fail("视频解码失败，请降低参数或更换编码"); }
+                } catch (RuntimeException e) { if (!stopped && !closed.get() && !gracefulClosing.get()) fail("视频解码失败，请降低参数或更换编码"); }
             }, "scrcpy-render"); output.start();
         }
         void feed(byte[] bytes, long pts, boolean config) throws IOException {

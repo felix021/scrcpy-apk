@@ -211,6 +211,16 @@ public class AdbStream implements Closeable {
         }
     }
 
+    /** Wait for the final WRTE acknowledgement before an intentional disconnect. */
+    public synchronized boolean awaitWriteComplete(long timeoutMillis) throws InterruptedException {
+        long end=System.nanoTime()+java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while(!isClosed && !writeReady.get()) {
+            long remaining=end-System.nanoTime();if(remaining<=0)return false;
+            java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this,remaining);
+        }
+        return !isClosed;
+    }
+
     /**
      * Closes the stream. This sends a close message to the peer.
      *
