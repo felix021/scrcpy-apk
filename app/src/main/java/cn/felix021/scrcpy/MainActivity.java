@@ -133,6 +133,12 @@ public final class MainActivity extends Activity {
             error.setBackground(background(0xff37272b, 12)); add(page, error, -2); gap(page, 10); errorMessage = null;
         }
         LinearLayout device = card(page);
+        add(device, label(profile.name.isEmpty() ? "连接配置" : "连接配置 · " + profile.name, 12, MUTED), -2); gap(device, 8);
+        LinearLayout configs = row();
+        Button load = button("切换配置  ▾", false), save = button("保存配置", false);
+        equal(configs, load, false); equal(configs, save, true);
+        load.setHeight(dp(40)); save.setHeight(dp(40)); add(device, configs, -2); gap(device, 10);
+        save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles(false));
         LinearLayout address = row(); LinearLayout hostGroup = column(), portGroup = column();
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(0, -2, 1); hp.setMarginEnd(dp(10));
         address.addView(hostGroup, hp); address.addView(portGroup, new LinearLayout.LayoutParams(dp(80), -2));
@@ -165,10 +171,6 @@ public final class MainActivity extends Activity {
         showNavigation = new Switch(this); showNavigation.setText("展示虚拟按键"); showNavigation.setTextSize(14); showNavigation.setTextColor(TEXT); showNavigation.setChecked(profile.showNavigation); add(parameters, showNavigation, 40);
         viewOnly = new Switch(this); viewOnly.setText("仅观看"); viewOnly.setTextSize(14); viewOnly.setTextColor(TEXT); viewOnly.setChecked(profile.viewOnly); add(parameters, viewOnly, 40);
         stayAwake = new Switch(this); stayAwake.setText("充电时保持远端唤醒"); stayAwake.setTextSize(14); stayAwake.setTextColor(TEXT); stayAwake.setChecked(profile.stayAwake); add(parameters, stayAwake, 40);
-        gap(page, 10);
-        LinearLayout saved = row(); Button save = button("保存为预设", false), load = button("我的预设", false); equal(saved, save, false); equal(saved, load, true);
-        save.setHeight(dp(44)); load.setHeight(dp(44)); add(page, saved, -2);
-        save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles());
         LinearLayout dock = column(); dock.setPadding(dp(16), dp(10), dp(16), dp(12));
         Button connect = button("连接设备   →", true); connect.setTextSize(17); add(dock, connect, 52); add(root, dock, -2);
         connect.setOnClickListener(v -> {
@@ -183,6 +185,7 @@ public final class MainActivity extends Activity {
             p.port = Integer.parseInt(port.getText().toString()); p.maxSize = Integer.parseInt(size.getText().toString());
             p.bitrate = Integer.parseInt(bitrate.getText().toString()); p.fps = Integer.parseInt(fps.getText().toString());
         } catch (NumberFormatException e) { throw new IllegalArgumentException("请填入完整的数字参数"); }
+        if (!p.host.equals(profile.host) || p.port != profile.port) p.name = "";
         p.codec = codec.getSelectedItemPosition() == 1 ? "h265" : "h264";
         p.showNavigation = showNavigation.isChecked(); p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked(); p.validate(); return p;
     }
@@ -193,7 +196,7 @@ public final class MainActivity extends Activity {
     private void applyPreset(int i) {
         int[] sizes = {1024, 1600, 2400}, bits = {2, 6, 12}, rates = {30, 60, 60};
         size.setText("" + sizes[i]); bitrate.setText("" + bits[i]); fps.setText("" + rates[i]); codec.setSelection(0);
-        profile.name = new String[]{"省流", "均衡", "高清"}[i]; toast("已应用" + profile.name + "，可继续修改参数");
+        toast("已应用" + new String[]{"省流", "均衡", "高清"}[i] + "画质，可继续修改参数");
     }
     private JSONArray savedProfiles() {
         try { return new JSONArray(prefs.getString("profiles", "[]")); }
@@ -202,8 +205,10 @@ public final class MainActivity extends Activity {
     private void saveProfile() {
         final Profile p;
         try { p = readForm(); } catch (Exception e) { toast(e.getMessage()); return; }
-        EditText name = new EditText(this); name.setSingleLine(true); name.setText(p.name); name.setSelectAllOnFocus(true);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("保存连接预设").setMessage("包含设备地址和当前画面参数；同名预设会更新。")
+        EditText name = new EditText(this); name.setSingleLine(true); name.setContentDescription("配置名称");
+        boolean sameDevice = p.host.equals(profile.host) && p.port == profile.port;
+        name.setText(!p.name.isEmpty() && sameDevice ? p.name : p.host + ":" + p.port); name.setSelectAllOnFocus(true);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("保存连接配置").setMessage("保存主机、端口、画面参数及全部控制选项。同名配置会更新。")
                 .setView(name).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String n = name.getText().toString().trim(); if (n.isEmpty()) { name.setError("请输入名称"); return; }
@@ -212,24 +217,27 @@ public final class MainActivity extends Activity {
                 JSONArray old = savedProfiles(), result = new JSONArray();
                 for (int i = 0; i < old.length(); i++) if (!old.getJSONObject(i).optString("name").equals(n)) result.put(old.getJSONObject(i));
                 result.put(p.json()); prefs.edit().putString("profiles", result.toString()).apply(); persist(p); profile = p;
-                dialog.dismiss(); toast("已保存「" + n + "」");
+                dialog.dismiss(); showForm(); toast("已保存「" + n + "」");
             } catch (Exception e) { toast("保存失败：" + e.getMessage()); }
         })); dialog.show();
     }
-    private void loadProfiles() {
-        JSONArray saved = savedProfiles(); if (saved.length() == 0) { toast("还没有保存的预设"); return; }
+    private void loadProfiles(boolean deleting) {
+        JSONArray saved = savedProfiles(); if (saved.length() == 0) { toast("还没有保存的连接配置"); return; }
         String[] labels = new String[saved.length()];
         for (int i = 0; i < labels.length; i++) {
-            Profile p = Profile.from(saved.optJSONObject(i)); labels[i] = p.name + "  ·  " + p.maxSize + "px / " + p.bitrate + "Mbps";
+            Profile p = Profile.from(saved.optJSONObject(i)); labels[i] = p.name + "\n" + p.host + ":" + p.port;
         }
-        new AlertDialog.Builder(this).setTitle("我的预设").setItems(labels, (dialog, which) -> {
-            Profile p = Profile.from(saved.optJSONObject(which));
-            new AlertDialog.Builder(this).setTitle(p.name).setMessage(p.host + ":" + p.port)
-                    .setPositiveButton("使用", (d, w) -> { persist(p); showForm(); })
-                    .setNeutralButton("删除", (d, w) -> {
-                        saved.remove(which); prefs.edit().putString("profiles", saved.toString()).apply(); toast("预设已删除");
-                    }).setNegativeButton("取消", null).show();
-        }).setNegativeButton("关闭", null).show();
+        AlertDialog.Builder picker = new AlertDialog.Builder(this).setTitle(deleting ? "删除连接配置" : "切换连接配置")
+                .setItems(labels, (dialog, which) -> {
+                    Profile p = Profile.from(saved.optJSONObject(which));
+                    if (!deleting) { persist(p); showForm(); return; }
+                    new AlertDialog.Builder(this).setTitle("删除「" + p.name + "」？").setMessage(p.host + ":" + p.port)
+                            .setPositiveButton("删除", (d, w) -> {
+                                saved.remove(which); prefs.edit().putString("profiles", saved.toString()).apply(); toast("连接配置已删除");
+                            }).setNegativeButton("取消", null).show();
+                }).setNegativeButton("关闭", null);
+        if (!deleting) picker.setNeutralButton("删除配置", (dialog, which) -> loadProfiles(true));
+        picker.show();
     }
 
     private void showMirror(Profile p) {
@@ -238,6 +246,8 @@ public final class MainActivity extends Activity {
         if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
+        View topBuffer = new View(this);
+        root.addView(topBuffer, new LinearLayout.LayoutParams(-1, statusBarHeight()));
         mirrorBody = row(); root.addView(mirrorBody,new LinearLayout.LayoutParams(-1,0,1));
         videoArea = new FrameLayout(this); videoArea.setBackgroundColor(Color.BLACK);
         mirrorBody.addView(videoArea,new LinearLayout.LayoutParams(-1,0,1));
@@ -297,25 +307,28 @@ public final class MainActivity extends Activity {
         surface.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> updateInputFrame());
         remoteInput.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> excludeLocalBackGestures());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            int left = 0, right = 0, top = 0, bottom;
+            int left = 0, right = 0, top = statusBarHeight(), bottom;
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets mandatory = insets.getInsetsIgnoringVisibility(WindowInsets.Type.mandatorySystemGestures());
                 android.graphics.Insets navInsets = insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars());
                 android.graphics.Insets gestures = insets.getInsetsIgnoringVisibility(WindowInsets.Type.systemGestures());
                 left = Math.max(mandatory.left, navInsets.left); right = Math.max(mandatory.right, navInsets.right);
                 bottom = Math.max(Math.max(mandatory.bottom, navInsets.bottom), gestures.bottom);
-                top = gestures.top;
+                top = Math.max(top, Math.max(gestures.top, insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top));
             } else {
                 left = insets.getStableInsetLeft(); right = insets.getStableInsetRight();
                 bottom = insets.getStableInsetBottom();
-                top = insets.getStableInsetTop();
+                top = Math.max(top, insets.getStableInsetTop());
             }
             if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
                 left = Math.max(left, insets.getDisplayCutout().getSafeInsetLeft()); right = Math.max(right, insets.getDisplayCutout().getSafeInsetRight());
                 top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
                 bottom = Math.max(bottom, insets.getDisplayCutout().getSafeInsetBottom());
             }
-            root.setPadding(left,top,right,bottom);
+            root.setPadding(left,0,right,bottom);
+            if (topBuffer.getLayoutParams().height != top) {
+                topBuffer.setLayoutParams(new LinearLayout.LayoutParams(-1, top));
+            }
             remoteInput.post(this::excludeLocalBackGestures);
             return insets;
         });
@@ -347,6 +360,11 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams old = (FrameLayout.LayoutParams) surface.getLayoutParams();
         if (old.width != w || old.height != h) surface.setLayoutParams(new FrameLayout.LayoutParams(w, h, Gravity.CENTER));
         surface.post(this::updateInputFrame);
+    }
+    private int statusBarHeight() {
+        // Fullscreen may report zero visible status/gesture insets on some systems.
+        int resource = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return resource == 0 ? dp(24) : Math.max(dp(24), getResources().getDimensionPixelSize(resource));
     }
     private ImageButton iconButton(int drawable,String description) {
         ImageButton button=new ImageButton(this);button.setImageResource(drawable);

@@ -15,8 +15,8 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard'], default='all',
-               help='Run core, lifecycle, compact UI, controls, or keyboard-only checks')
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets'], default='all',
+               help='Run core, lifecycle, UI, controls, keyboard, configs, or fullscreen-inset checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
@@ -94,8 +94,8 @@ def bottom():
     end = time.monotonic() + 25
     while time.monotonic() < end:
         root = dump()
-        if find(text='我的预设', root=root) is not None:
-            return
+        if find(text='充电时保持远端唤醒', root=root) is not None:
+            return root
         if any(n.get('package') == PKG for n in root.iter('node')):
             shell(a.client, 'input', 'swipe', 1030, 2100, 1030, 600, 400)
         time.sleep(.3)
@@ -107,7 +107,7 @@ def top():
     while time.monotonic() < end:
         root = dump()
         if find(text='远程控制', root=root) is not None:
-            return
+            return root
         shell(a.client, 'input', 'swipe', 1030, 600, 1030, 2100, 400)
         time.sleep(.3)
     raise AssertionError('Form did not scroll to device fields')
@@ -207,6 +207,7 @@ def verify_ui():
     click(find(desc='视频编码')); tap('H.264')
     record('video codec dropdown exposes both selectable options')
     # A shorter viewport forces scrolling without changing the normal-size layout.
+    top()
     shell(a.client,'wm','size','1080x1600'); time.sleep(.6)
     before = dump(); button_before = bounds(find(text='连接设备   →',root=before))
     before_fields = [n.get('bounds') for n in before.iter('node') if n.get('class') == 'android.widget.EditText']
@@ -426,6 +427,130 @@ def verify_controls():
         if nav:shell(a.target,'cmd','overlay','enable-exclusive','--category',nav)
 
 
+def verify_top_buffer():
+    def bounds(node):
+        assert node is not None
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    connect();start_probe()
+    def check_buffer(orientation):
+        root=wait_connected();l,t,r,b=bounds(find(desc='远控触控区',root=root))
+        state=shell(a.client,'dumpsys','window')
+        bars=re.findall(r'type=statusBars frame=\[0,0\]\[\d+,(\d+)\] visible=(true|false)',state)
+        assert bars and t>=int(bars[0][0])>0, ('Remote input overlaps status-bar area',t,bars[:3])
+        assert bars[0][1]=='false', 'Native status bar should remain hidden in fullscreen'
+        shell(a.target,'logcat','-c');shell(a.client,'input','tap',(l+r)//2,t//2)
+        assert 'TOUCH' not in logs(), 'Top blank area forwarded a remote touch'
+        for attempt in range(2):
+            start_probe()
+            root=dump();vl,vt,vr,vb=bounds(find(desc='远控屏幕',root=root))
+            before=adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S')
+            shell(a.client,'input','swipe',(vl+vr)//2,vt+2,(vl+vr)//2,vt+(vb-vt)//3,300)
+            after=adb(a.client,'logcat','-d','-s','RemoteGesture:D','*:S')
+            assert after.count('EDGE_ACTION_TOP')>before.count('EDGE_ACTION_TOP')
+            assert after.count('CANCEL')==before.count('CANCEL')
+            windows=shell(a.client,'dumpsys','window')
+            assert re.search(r'mCurrentFocus=.*cn\.felix021\.scrcpy',windows), 'Local shade took focus'
+            deadline=time.monotonic()+5
+            while time.monotonic()<deadline:
+                target_windows=shell(a.target,'dumpsys','window')
+                if re.search(r'mCurrentFocus=.*(NotificationShade|StatusBar)',target_windows,re.I):break
+                time.sleep(.1)
+            else:raise AssertionError('Remote shade did not open')
+            shell(a.target,'cmd','statusbar','collapse')
+        screenshot('20-top-buffer-'+orientation)
+        record(orientation+' fullscreen hides local status bar, keeps its full height blank and sends top swipes only to target')
+    check_buffer('portrait')
+    shell(a.client,'settings','put','system','accelerometer_rotation',0);shell(a.client,'settings','put','system','user_rotation',1)
+    time.sleep(1);check_buffer('landscape')
+    tap('断开')
+    shell(a.client,'settings','put','system','user_rotation',0);time.sleep(.5)
+
+
+def verify_configs():
+    def bounds(node):
+        assert node is not None
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    def snapshot():
+        raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
+        values=ET.fromstring(raw)
+        return json.loads(next((n.text for n in values if n.get('name')=='profiles'),'[]'))
+    def switches(navigation, watching, awake):
+        bottom()
+        for text,value in [('展示虚拟按键',navigation),('仅观看',watching),('充电时保持远端唤醒',awake)]:
+            if find(text=text).get('checked')!=str(value).lower():tap(text)
+    def save(name=None, suggested=None):
+        top();tap('保存配置')
+        node=find(desc='配置名称')
+        if suggested is not None:assert node.get('text')==suggested, node.attrib
+        if name is not None:
+            click(node)
+            shell(a.client,'input','keyevent','KEYCODE_MOVE_END')
+            shell(a.client,'input','keyevent',*(['KEYCODE_DEL']*100))
+            shell(a.client,'input','text',name)
+        tap('保存')
+        assert find(text='保存连接配置') is None
+    def picker():
+        top();tap('切换配置  ▾');return dump()
+    def choose(name):
+        root=picker()
+        click(next(n for n in root.iter('node') if n.get('text','').startswith(name+'\n')))
+        assert find(text='使用') is None
+    def expect(profile):
+        roots=[top(),bottom()]
+        nodes=[n for root in roots for n in root.iter('node')]
+        for desc,key in [('设备 IP / 主机名','host'),('ADB 端口','port'),('最长边 · px','maxSize'),('码率 · Mbps','bitrate'),('帧率上限 · FPS','fps')]:
+            node=next((n for n in nodes if n.get('content-desc')==desc),None)
+            assert node is not None and node.get('text')==str(profile[key]), (desc,node.attrib if node is not None else None)
+        assert any(n.get('text')==('H.265' if profile['codec']=='h265' else 'H.264') for n in nodes)
+        for text,key in [('展示虚拟按键','showNavigation'),('仅观看','viewOnly'),('充电时保持远端唤醒','stayAwake')]:
+            node=next(n for n in nodes if n.get('text')==text)
+            assert node.get('checked')==str(profile.get(key,key!='viewOnly')).lower(), key
+    def remove(name, confirm=True):
+        picker();tap('删除配置');root=dump()
+        click(next(n for n in root.iter('node') if n.get('text','').startswith(name+'\n')))
+        tap('删除' if confirm else '取消')
+    name_a=test_name+'-A';name_b=test_name+'-B'
+    # Existing stored objects retain exactly the same schema and values on upgrade.
+    old=snapshot()
+    (a.output/'profiles-before.json').write_text(json.dumps(old,ensure_ascii=False))
+    if old:
+        choose(old[0]['name']);expect(old[0])
+        record('existing saved connection restores after upgrading from previous APK')
+    top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));tap('省流')
+    edit('最长边 · px','1280');switches(True,False,True);save(name_a)
+    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True)
+    top();edit('设备 IP / 主机名','second-device.example');edit('ADB 端口','5566');tap('高清')
+    edit('最长边 · px','1920');edit('帧率上限 · FPS','45');click(find(desc='视频编码'));tap('H.265')
+    switches(False,True,False);save(name_b,'second-device.example:5566')
+    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False)
+    root=picker()
+    assert find(text=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
+    assert find(text=name_b+'\nsecond-device.example:5566',root=root) is not None
+    screenshot('18-connection-picker');tap('关闭')
+    choose(name_a);expect(config_a);choose(name_b);expect(config_b)
+    record('two independent hosts restore address, port, codec, all video parameters and all switches with one selection')
+    choose(name_a);tap('高清');top();tap('保存配置')
+    assert find(desc='配置名称').get('text')==name_a
+    tap('取消');tap('省流');edit('最长边 · px','1280');edit('码率 · Mbps','4');save(suggested=name_a)
+    config_a['bitrate']=4
+    profiles=snapshot()
+    assert sum(p['name']==name_a for p in profiles)==1
+    assert next(p for p in profiles if p['name']==name_b)==config_b
+    assert all(p in profiles for p in old)
+    choose(name_b);expect(config_b);choose(name_a);expect(config_a)
+    shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    expect(config_a);screenshot('19-selected-connection')
+    record('quality shortcuts preserve connection name; same-name save replaces only that config; restart retains selected settings and old configs')
+    remove(name_b,False)
+    assert any(p['name']==name_b for p in snapshot())
+    remove(name_b)
+    assert not any(p['name']==name_b for p in snapshot())
+    assert next(p for p in snapshot() if p['name']==name_a)==config_a
+    record('delete cancellation preserves config and confirmed deletion leaves other hosts intact')
+    verify_top_buffer()
+    remove(name_a)
+
+
 try:
     adb(a.client, 'install', '-r', ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
     adb(a.target, 'install', '-r', ROOT / 'validation/probe/build/outputs/apk/debug/probe-debug.apk')
@@ -445,6 +570,12 @@ try:
         sys.exit(0)
     if find(text='展示虚拟按键').get('checked') == 'false':
         tap('展示虚拟按键')
+    if a.phase == 'configs':
+        verify_configs()
+        sys.exit(0)
+    if a.phase == 'insets':
+        tap('省流');verify_top_buffer()
+        sys.exit(0)
     if a.phase in ['controls','keyboard']:
         verify_controls()
         sys.exit(0)
@@ -452,24 +583,23 @@ try:
         tap('省流')
         edit('最长边 · px', '1280')
         # Save a custom profile through the actual dialog.
-        tap('保存为预设')
+        top(); tap('保存配置')
         root = dump()
         click(next(n for n in root.iter('node') if n.get('class') == 'android.widget.EditText'))
         shell(a.client, 'input', 'keyevent', 'KEYCODE_MOVE_END')
         shell(a.client, 'input', 'keyevent', *(['KEYCODE_DEL'] * 32))
         shell(a.client, 'input', 'text', test_name)
         tap('保存')
-        assert find(text='保存连接预设') is None, 'Save dialog did not close'
+        assert find(text='保存连接配置') is None, 'Save dialog did not close'
         record('custom profile saved using UI')
         shell(a.client, 'am', 'force-stop', PKG)
         shell(a.client, 'am', 'start', '-n', PKG + '/.MainActivity')
         time.sleep(.5)
         bottom()
-        tap('我的预设')
+        top(); tap('切换配置  ▾')
         root = dump()
-        chosen = next(n for n in root.iter('node') if n.get('text', '').startswith(test_name + ' '))
+        chosen = next(n for n in root.iter('node') if n.get('text', '').startswith(test_name + '\n'))
         click(chosen)
-        tap('使用')
         bottom()
         assert find(text='1280') is not None
         assert find(text='2') is not None
@@ -583,6 +713,10 @@ try:
     edit('设备 IP / 主机名', '192.0.2.1')
     bottom()
     tap('连接设备   →')
+    stored=ET.fromstring(shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml'))
+    last=json.loads(next(n.text for n in stored if n.get('name')=='last'))
+    assert last['name']=='', 'Editing the endpoint carried another saved host name into the new connection'
+    record('editing host or port clears the previous config name before persisting a connection')
     tap('断开')
     top()
     edit('设备 IP / 主机名', a.host)

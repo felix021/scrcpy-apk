@@ -4,7 +4,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 final class Profile {
-    String name = "均衡";
+    String name = "";
     String host = "";
     int port = 5555;
     int maxSize = 1600;
@@ -23,7 +23,7 @@ final class Profile {
 
     static Profile from(JSONObject j) {
         Profile p = new Profile();
-        p.name = j.optString("name", "均衡"); p.host = j.optString("host", "");
+        p.name = j.optString("name", ""); p.host = j.optString("host", "");
         p.port = j.optInt("port", 5555); p.maxSize = j.optInt("maxSize", 1600);
         p.bitrate = j.optInt("bitrate", 6); p.fps = j.optInt("fps", 60);
         p.codec = j.optString("codec", "h264"); p.viewOnly = j.optBoolean("viewOnly");
