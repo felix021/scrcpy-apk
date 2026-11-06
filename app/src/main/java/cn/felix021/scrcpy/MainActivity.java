@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Rect;
+import android.os.Build;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -15,12 +17,18 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.ViewConfiguration;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,8 +40,8 @@ public final class MainActivity extends Activity {
     private static final int MUTED = 0xff96aab9, ACCENT = 0xff80e2c3;
     private SharedPreferences prefs;
     private EditText host, port, size, bitrate, fps;
-    private Button codec;
-    private Switch viewOnly, stayAwake;
+    private Spinner codec;
+    private Switch viewOnly, stayAwake, showNavigation;
     private Profile profile;
     private ScrcpySession session;
     private boolean mirroring;
@@ -42,6 +50,7 @@ public final class MainActivity extends Activity {
     private SurfaceView surface;
     private TextView connectionStatus;
     private String errorMessage;
+    private final android.util.SparseArray<EdgeGesture> touchGestures = new android.util.SparseArray<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -75,16 +84,16 @@ public final class MainActivity extends Activity {
         return b;
     }
     private LinearLayout card(LinearLayout parent) {
-        LinearLayout c = column(); c.setBackground(background(CARD, 22)); c.setPadding(dp(20), dp(20), dp(20), dp(20));
+        LinearLayout c = column(); c.setBackground(background(CARD, 18)); c.setPadding(dp(14), dp(14), dp(14), dp(14));
         add(parent, c, -2); return c;
     }
     private EditText field(LinearLayout parent, String title, String value, boolean numeric) {
-        add(parent, label(title, 12, MUTED), -2); gap(parent, 6);
-        EditText e = new EditText(this); e.setText(value); e.setTextColor(TEXT); e.setTextSize(17);
+        add(parent, label(title, 11, MUTED), -2); gap(parent, 4);
+        EditText e = new EditText(this); e.setText(value); e.setTextColor(TEXT); e.setTextSize(16);
         e.setSingleLine(true); e.setSelectAllOnFocus(true); e.setPadding(dp(12), 0, dp(12), 0);
         e.setBackground(background(0xff0e1921, 10));
         e.setInputType(numeric ? InputType.TYPE_CLASS_NUMBER : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        e.setContentDescription(title); add(parent, e, 50); return e;
+        e.setContentDescription(title); add(parent, e, 44); return e;
     }
     private void equal(LinearLayout r, View v, boolean last) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -2, 1);
@@ -97,59 +106,72 @@ public final class MainActivity extends Activity {
     private void showForm() {
         mirroring = false; generation++;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            getWindow().setAttributes(attrs);
+        }
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(true);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) controller.show(WindowInsets.Type.systemBars());
+        }
         profile = lastProfile();
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(BG);
-        LinearLayout page = column(); page.setPadding(dp(24), dp(24), dp(24), dp(28));
-        scroll.addView(page, new ScrollView.LayoutParams(-1, -2)); setContentView(scroll);
-        TextView brand = label("●  SCRCPY / ANDROID", 12, ACCENT); brand.setLetterSpacing(.12f); add(page, brand, -2);
-        gap(page, 16);
-        TextView title = label("远处的屏幕，\n触手可及。", 32, TEXT); title.setTypeface(null, Typeface.BOLD); add(page, title, -2);
-        gap(page, 10); add(page, label("通过 EasyTier 网络，连接你的 Android 设备", 13, MUTED), -2); gap(page, 24);
+        LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
+        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(false);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout page = column(); page.setPadding(dp(16), dp(14), dp(16), dp(12));
+        scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
+        TextView title = label("远程控制", 24, TEXT); title.setTypeface(null, Typeface.BOLD); add(page, title, -2);
+        gap(page, 3); add(page, label("SCRCPY  /  ANDROID", 10, ACCENT), -2); gap(page, 12);
         if (errorMessage != null) {
-            TextView error = label(errorMessage, 14, 0xffffb6aa); error.setPadding(dp(16), dp(14), dp(16), dp(14));
-            error.setBackground(background(0xff37272b, 14)); add(page, error, -2); gap(page, 16); errorMessage = null;
+            TextView error = label(errorMessage, 13, 0xffffb6aa); error.setPadding(dp(12), dp(10), dp(12), dp(10));
+            error.setBackground(background(0xff37272b, 12)); add(page, error, -2); gap(page, 10); errorMessage = null;
         }
         LinearLayout device = card(page);
-        TextView deviceTitle = label("01  /  连接设备", 17, TEXT); deviceTitle.setTypeface(null, Typeface.BOLD); add(device, deviceTitle, -2);
-        gap(device, 18);
-        host = field(device, "EasyTier IP / 主机名", profile.host, false); host.setHint("输入设备 IP"); host.setHintTextColor(MUTED);
-        gap(device, 14); port = field(device, "ADB 端口", "" + profile.port, true);
-        gap(device, 12); add(device, label("设备需开启 ADB 网络调试；首次连接时，请在设备上允许调试。", 12, MUTED), -2);
-        gap(page, 16);
+        LinearLayout address = row(); LinearLayout hostGroup = column(), portGroup = column();
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(0, -2, 1); hp.setMarginEnd(dp(10));
+        address.addView(hostGroup, hp); address.addView(portGroup, new LinearLayout.LayoutParams(dp(80), -2));
+        host = field(hostGroup, "设备 IP / 主机名", profile.host, false); host.setHint("输入设备地址"); host.setHintTextColor(MUTED);
+        port = field(portGroup, "ADB 端口", "" + profile.port, true); add(device, address, -2);
+        gap(device, 8); add(device, label("首次连接，请在远端允许调试。", 11, MUTED), -2); gap(page, 10);
         LinearLayout parameters = card(page);
-        TextView paramsTitle = label("02  /  画面与控制", 17, TEXT); paramsTitle.setTypeface(null, Typeface.BOLD); add(parameters, paramsTitle, -2); gap(parameters, 16);
+        TextView paramsTitle = label("画面与控制", 15, TEXT); paramsTitle.setTypeface(null, Typeface.BOLD); add(parameters, paramsTitle, -2); gap(parameters, 10);
         LinearLayout presets = row();
         String[] names = {"省流", "均衡", "高清"};
         for (int i = 0; i < names.length; i++) {
-            final int preset = i; Button b = button(names[i], false);
-            b.setOnClickListener(v -> applyPreset(preset));
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(44), 1); if (i < 2) p.setMarginEnd(dp(8)); presets.addView(b, p);
+            final int preset = i; Button button = button(names[i], false);
+            button.setOnClickListener(v -> applyPreset(preset));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1); if (i < 2) lp.setMarginEnd(dp(8)); presets.addView(button, lp);
         }
-        add(parameters, presets, -2); gap(parameters, 18);
+        add(parameters, presets, -2); gap(parameters, 12);
         LinearLayout numbers = row(); LinearLayout a = column(), b = column(); equal(numbers, a, false); equal(numbers, b, true);
         size = field(a, "最长边 · px", "" + profile.maxSize, true);
-        bitrate = field(b, "码率 · Mbps", "" + profile.bitrate, true); add(parameters, numbers, -2);
-        gap(parameters, 14);
+        bitrate = field(b, "码率 · Mbps", "" + profile.bitrate, true); add(parameters, numbers, -2); gap(parameters, 10);
         LinearLayout more = row(); LinearLayout c = column(), d = column(); equal(more, c, false); equal(more, d, true);
         fps = field(c, "帧率上限 · FPS", "" + profile.fps, true);
-        add(d, label("视频编码", 12, MUTED), -2); gap(d, 6);
-        codec = button(profile.codec.toUpperCase(java.util.Locale.ROOT), false); add(d, codec, 50);
-        codec.setOnClickListener(v -> codec.setText(codec.getText().toString().equals("H264") ? "H265" : "H264"));
-        add(parameters, more, -2); gap(parameters, 12);
-        add(parameters, label("最长边填 0 保留原始尺寸；H.264 兼容性更好。", 12, MUTED), -2); gap(parameters, 12);
-        viewOnly = new Switch(this); viewOnly.setText("仅观看"); viewOnly.setTextColor(TEXT); viewOnly.setChecked(profile.viewOnly); add(parameters, viewOnly, 48);
-        stayAwake = new Switch(this); stayAwake.setText("充电时保持远端唤醒"); stayAwake.setTextColor(TEXT); stayAwake.setChecked(profile.stayAwake); add(parameters, stayAwake, 48);
-        gap(page, 16);
+        add(d, label("视频编码", 11, MUTED), -2); gap(d, 4);
+        codec = new Spinner(this); codec.setContentDescription("视频编码");
+        ArrayAdapter<String> codecs = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{"H.264", "H.265"});
+        codec.setAdapter(codecs); codec.setSelection(profile.codec.equals("h265") ? 1 : 0);
+        codec.setBackground(getDrawable(R.drawable.spinner_background)); codec.setPadding(dp(8), 0, dp(30), 0);
+        codec.setPopupBackgroundDrawable(background(CARD, 12)); add(d, codec, 44);
+        add(parameters, more, -2); gap(parameters, 8);
+        add(parameters, label("最长边 0 = 原始尺寸 · H.264 兼容性更好", 10, MUTED), -2); gap(parameters, 4);
+        showNavigation = new Switch(this); showNavigation.setText("展示虚拟按键"); showNavigation.setTextSize(14); showNavigation.setTextColor(TEXT); showNavigation.setChecked(profile.showNavigation); add(parameters, showNavigation, 40);
+        viewOnly = new Switch(this); viewOnly.setText("仅观看"); viewOnly.setTextSize(14); viewOnly.setTextColor(TEXT); viewOnly.setChecked(profile.viewOnly); add(parameters, viewOnly, 40);
+        stayAwake = new Switch(this); stayAwake.setText("充电时保持远端唤醒"); stayAwake.setTextSize(14); stayAwake.setTextColor(TEXT); stayAwake.setChecked(profile.stayAwake); add(parameters, stayAwake, 40);
+        gap(page, 10);
         LinearLayout saved = row(); Button save = button("保存为预设", false), load = button("我的预设", false); equal(saved, save, false); equal(saved, load, true);
-        save.setHeight(dp(48)); load.setHeight(dp(48)); add(page, saved, -2);
+        save.setHeight(dp(44)); load.setHeight(dp(44)); add(page, saved, -2);
         save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles());
-        gap(page, 18); Button connect = button("连接设备   →", true); connect.setTextSize(17); add(page, connect, 58);
+        LinearLayout dock = column(); dock.setPadding(dp(16), dp(10), dp(16), dp(12));
+        Button connect = button("连接设备   →", true); connect.setTextSize(17); add(dock, connect, 52); add(root, dock, -2);
         connect.setOnClickListener(v -> {
             try { Profile p = readForm(); persist(p); showMirror(p); }
             catch (Exception e) { toast(e.getMessage()); }
         });
-        gap(page, 16); TextView note = label("端到端直连  ·  参数自动记住  ·  Home / Menu / Back 虚拟按键", 11, MUTED); note.setGravity(Gravity.CENTER); add(page, note, -2);
     }
 
     private Profile readForm() {
@@ -158,8 +180,8 @@ public final class MainActivity extends Activity {
             p.port = Integer.parseInt(port.getText().toString()); p.maxSize = Integer.parseInt(size.getText().toString());
             p.bitrate = Integer.parseInt(bitrate.getText().toString()); p.fps = Integer.parseInt(fps.getText().toString());
         } catch (NumberFormatException e) { throw new IllegalArgumentException("请填入完整的数字参数"); }
-        p.codec = codec.getText().toString().toLowerCase(java.util.Locale.ROOT);
-        p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked(); p.validate(); return p;
+        p.codec = codec.getSelectedItemPosition() == 1 ? "h265" : "h264";
+        p.showNavigation = showNavigation.isChecked(); p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked(); p.validate(); return p;
     }
     private void persist(Profile p) {
         try { prefs.edit().putString("last", p.json().toString()).apply(); }
@@ -167,7 +189,7 @@ public final class MainActivity extends Activity {
     }
     private void applyPreset(int i) {
         int[] sizes = {1024, 1600, 2400}, bits = {2, 6, 12}, rates = {30, 60, 60};
-        size.setText("" + sizes[i]); bitrate.setText("" + bits[i]); fps.setText("" + rates[i]); codec.setText("H264");
+        size.setText("" + sizes[i]); bitrate.setText("" + bits[i]); fps.setText("" + rates[i]); codec.setSelection(0);
         profile.name = new String[]{"省流", "均衡", "高清"}[i]; toast("已应用" + profile.name + "，可继续修改参数");
     }
     private JSONArray savedProfiles() {
@@ -208,28 +230,85 @@ public final class MainActivity extends Activity {
     }
 
     private void showMirror(Profile p) {
-        profile = p; mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
+        profile = p; touchGestures.clear(); mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
+        View focus = getCurrentFocus();
+        if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
-        LinearLayout toolbar = row(); toolbar.setPadding(dp(16), 0, dp(8), 0);
-        connectionStatus = label("正在连接…", 13, ACCENT);
-        toolbar.addView(connectionStatus, new LinearLayout.LayoutParams(0, -2, 1));
-        Button exit = button("断开", false); toolbar.addView(exit, new LinearLayout.LayoutParams(dp(72), dp(36)));
-        exit.setOnClickListener(v -> disconnect(null)); add(root, toolbar, 56);
+        LinearLayout statusBar = row(); statusBar.setPadding(dp(8), 0, dp(4), 0);
+        connectionStatus = label("正在连接…", 11, ACCENT); connectionStatus.setSingleLine(true);
+        connectionStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        statusBar.addView(connectionStatus, new LinearLayout.LayoutParams(0, -2, 1));
+        if (p.showNavigation) {
+            String[] titles = {"‹", "○", "≡", "□"}, descriptions = {"Back", "Home", "Menu", "最近任务"};
+            int[] codes = {4, 3, 82, 187};
+            for (int i = 0; i < titles.length; i++) {
+                final int key = codes[i]; Button keyButton = button(titles[i], false);
+                keyButton.setTextSize(19); keyButton.setPadding(0, 0, 0, 0);
+                keyButton.setContentDescription(descriptions[i]); keyButton.setTooltipText(descriptions[i]);
+                keyButton.setEnabled(!p.viewOnly); keyButton.setAlpha(p.viewOnly ? .35f : 1);
+                keyButton.setOnClickListener(v -> { if (session != null) session.key(key); });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(32)); lp.setMarginEnd(dp(3)); statusBar.addView(keyButton, lp);
+            }
+        }
+        Button exit = button("断开", false); exit.setTextSize(11); exit.setPadding(0, 0, 0, 0);
+        statusBar.addView(exit, new LinearLayout.LayoutParams(dp(46), dp(32)));
+        exit.setOnClickListener(v -> disconnect(null)); add(root, statusBar, 36);
         videoArea = new FrameLayout(this); videoArea.setBackgroundColor(Color.BLACK);
         root.addView(videoArea, new LinearLayout.LayoutParams(-1, 0, 1));
-        surface = new SurfaceView(this); videoArea.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+        surface = new SurfaceView(this); surface.setContentDescription("远控屏幕");
+        videoArea.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         videoArea.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitVideo());
+        surface.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> excludeLocalBackGestures());
         surface.setOnTouchListener((v, e) -> touch(e));
-        LinearLayout nav = row(); nav.setPadding(dp(12), dp(10), dp(12), dp(10));
-        String[] titles = {"‹  Back", "○  Home", "≡  Menu", "□  最近"}; int[] codes = {4, 3, 82, 187};
-        for (int i = 0; i < titles.length; i++) {
-            final int key = codes[i]; Button b = button(titles[i], false); b.setTextSize(12); b.setEnabled(!p.viewOnly);
-            b.setAlpha(p.viewOnly ? .35f : 1); b.setOnClickListener(v -> { if (session != null) session.key(key); });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1); if (i < 3) lp.setMarginEnd(dp(6)); nav.addView(b, lp);
-        }
-        add(root, nav, -2);
-        if (p.viewOnly) connectionStatus.setText("正在连接 · 仅观看");
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int left = 0, right = 0, top = 0, bottom;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets mandatory = insets.getInsetsIgnoringVisibility(WindowInsets.Type.mandatorySystemGestures());
+                android.graphics.Insets navigation = insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars());
+                android.graphics.Insets gestures = insets.getInsetsIgnoringVisibility(WindowInsets.Type.systemGestures());
+                left = Math.max(mandatory.left, navigation.left); right = Math.max(mandatory.right, navigation.right);
+                bottom = Math.max(Math.max(mandatory.bottom, navigation.bottom), gestures.bottom);
+                top = gestures.top;
+            } else {
+                left = insets.getStableInsetLeft(); right = insets.getStableInsetRight();
+                bottom = insets.getStableInsetBottom();
+                top = insets.getStableInsetTop();
+            }
+            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
+                left = Math.max(left, insets.getDisplayCutout().getSafeInsetLeft()); right = Math.max(right, insets.getDisplayCutout().getSafeInsetRight());
+                top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
+                bottom = Math.max(bottom, insets.getDisplayCutout().getSafeInsetBottom());
+            }
+            // The status strip protects the video from the top mandatory region;
+            // only the bottom safe area is reserved beneath the video.
+            root.setPadding(left, 0, right, bottom);
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) statusBar.getLayoutParams();
+            int barHeight = Math.max(dp(36), top);
+            int barLeft = dp(8), barRight = dp(4), barTop = 0;
+            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null && insets.getDisplayCutout().getSafeInsetTop() > 0) {
+                int blockedLeft = 0, blockedRight = 0;
+                int width = root.getWidth();
+                for (Rect hole : insets.getDisplayCutout().getBoundingRects()) {
+                    if (hole.top >= insets.getDisplayCutout().getSafeInsetTop()) continue;
+                    if (hole.centerX() < width / 2) blockedLeft = Math.max(blockedLeft, hole.right);
+                    else blockedRight = Math.max(blockedRight, width - hole.left);
+                }
+                if (width - left - right - blockedLeft - blockedRight >= dp(p.showNavigation ? 285 : 140)) {
+                    barLeft = Math.max(barLeft, blockedLeft + dp(4)); barRight = Math.max(barRight, blockedRight + dp(4));
+                } else {
+                    barTop = insets.getDisplayCutout().getSafeInsetTop(); barHeight = barTop + dp(36);
+                }
+            }
+            statusBar.setPadding(barLeft, barTop, barRight, 0);
+            if (lp.height != barHeight) { lp.height = barHeight; statusBar.setLayoutParams(lp); }
+            surface.post(this::excludeLocalBackGestures);
+            return insets;
+        });
+        root.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) view.post(view::requestApplyInsets);
+        });
+        enterRemoteFullscreen(); root.requestApplyInsets();
         surface.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder holder) {
                 if (token != generation || session != null) return;
@@ -237,7 +316,7 @@ public final class MainActivity extends Activity {
                     private void ui(Runnable r) { runOnUiThread(() -> { if (token == generation) r.run(); }); }
                     @Override public void status(String text) { ui(() -> connectionStatus.setText(text)); }
                     @Override public void size(int w, int h) { ui(() -> { videoWidth = w; videoHeight = h; fitVideo(); }); }
-                    @Override public void ready(String device) { ui(() -> connectionStatus.setText("● " + device + " · " + (p.viewOnly ? "仅观看" : "已连接"))); }
+                    @Override public void ready(String device) { ui(() -> connectionStatus.setText("● " + (p.viewOnly ? "仅观看" : "已连接") + " · " + device)); }
                     @Override public void error(String message) { ui(() -> disconnect("连接结束：" + message)); }
                 }); session.start();
             }
@@ -253,29 +332,82 @@ public final class MainActivity extends Activity {
         int w = Math.max(1, Math.round(videoWidth * scale)), h = Math.max(1, Math.round(videoHeight * scale));
         FrameLayout.LayoutParams old = (FrameLayout.LayoutParams) surface.getLayoutParams();
         if (old.width != w || old.height != h) surface.setLayoutParams(new FrameLayout.LayoutParams(w, h, Gravity.CENTER));
+        surface.post(this::excludeLocalBackGestures);
     }
     private boolean touch(MotionEvent e) {
         if (session == null || profile.viewOnly || videoWidth == 0) return true;
         int action = e.getActionMasked(), index = e.getActionIndex();
+        if (action == MotionEvent.ACTION_CANCEL) android.util.Log.d("RemoteGesture", "CANCEL");
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            if (action == MotionEvent.ACTION_DOWN) touchGestures.clear();
+            EdgeGesture gesture = new EdgeGesture();
+            gesture.begin(e.getX(index), e.getY(index), surface.getWidth(), surface.getHeight(), dp(8));
+            touchGestures.put(e.getPointerId(index), gesture);
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            for (int i = 0; i < e.getPointerCount(); i++) {
+                EdgeGesture gesture = touchGestures.get(e.getPointerId(i));
+                if (gesture == null) continue;
+                EdgeGesture.Edge edge = gesture.recognize(e.getX(i), e.getY(i), ViewConfiguration.get(this).getScaledTouchSlop());
+                if (edge != EdgeGesture.Edge.NONE) android.util.Log.d("RemoteGesture", edge.name());
+            }
+        }
         if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_CANCEL) {
             for (int i = 0; i < e.getPointerCount(); i++) sendTouch(e, i, action == MotionEvent.ACTION_CANCEL ? MotionEvent.ACTION_UP : action);
         } else if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) sendTouch(e, index, MotionEvent.ACTION_DOWN);
         else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) sendTouch(e, index, MotionEvent.ACTION_UP);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) touchGestures.clear();
+        else if (action == MotionEvent.ACTION_POINTER_UP) touchGestures.remove(e.getPointerId(index));
         return true;
     }
     private void sendTouch(MotionEvent e, int index, int action) {
-        int x = Math.max(0, Math.min(videoWidth - 1, (int) (e.getX(index) * videoWidth / surface.getWidth())));
-        int y = Math.max(0, Math.min(videoHeight - 1, (int) (e.getY(index) * videoHeight / surface.getHeight())));
+        EdgeGesture gesture = touchGestures.get(e.getPointerId(index));
+        if (gesture == null) return;
+        int x = gesture.x(e.getX(index), surface.getWidth(), videoWidth);
+        int y = gesture.y(e.getY(index), surface.getHeight(), videoHeight);
         session.touch(action, e.getPointerId(index), x, y, videoWidth, videoHeight, action == MotionEvent.ACTION_UP ? 0 : e.getPressure(index));
     }
+    private void enterRemoteFullscreen() {
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attrs);
+        }
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(WindowInsets.Type.systemBars());
+            }
+        }
+    }
+    private void excludeLocalBackGestures() {
+        if (Build.VERSION.SDK_INT >= 29 && mirroring && surface.getWidth() > 0) {
+            // Full-height exclusion is permitted while navigation bars are hidden
+            // with transient-by-swipe behavior. Mandatory top/bottom zones remain local.
+            surface.setSystemGestureExclusionRects(java.util.Collections.singletonList(new Rect(0, 0, surface.getWidth(), surface.getHeight())));
+        }
+    }
+    @Override public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        if (focus && mirroring) enterRemoteFullscreen();
+    }
     private void disconnect(String error) {
-        generation++; mirroring = false;
+        generation++; mirroring = false; touchGestures.clear();
         ScrcpySession s = session; session = null; if (s != null) s.close();
         errorMessage = error; showForm();
     }
     @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); if (mirroring) videoArea.post(this::fitVideo); }
     @Override protected void onStop() { super.onStop(); if (mirroring) disconnect("已离开远控界面，连接已断开"); }
     @Override protected void onDestroy() { if (session != null) session.close(); super.onDestroy(); }
-    @Override public void onBackPressed() { if (mirroring) disconnect(null); else super.onBackPressed(); }
+    @Override public void onBackPressed() {
+        if (mirroring) {
+            android.util.Log.d("RemoteGesture", "LOCAL_BACK_FORWARD");
+            if (session != null) session.key(4);
+        } else super.onBackPressed();
+    }
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
 }
