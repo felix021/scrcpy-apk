@@ -15,8 +15,8 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets'], default='all',
-               help='Run core, lifecycle, UI, controls, keyboard, configs, or fullscreen-inset checks')
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance'], default='all',
+               help='Run core, lifecycle, UI, controls, keyboard, configs, insets, or appearance checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
@@ -79,6 +79,10 @@ def click(node):
 
 
 def tap(text):
+    if text == '断开':
+        click(find(desc='断开连接'))
+        tap('确认断开')
+        return
     end = time.monotonic() + 12
     while time.monotonic() < end:
         node = find(text=text)
@@ -169,7 +173,7 @@ def verify_ui():
         assert node is not None
         return tuple(map(int, re.findall(r'\d+', node.get('bounds'))))
     def stay_connected():
-        assert find(text='断开') is not None, 'Local Back or gesture exited remote control'
+        assert find(desc='断开连接') is not None, 'Local Back or gesture exited remote control'
     def swipe(edge):
         x1,y1,x2,y2 = bounds(find(desc='远控屏幕'))
         w,h = x2-x1,y2-y1
@@ -315,7 +319,7 @@ def verify_controls():
         for marker in ['LOCAL_BACK_FORWARD','CANCEL']:
             assert after.count(marker)==before.count(marker), marker+' intercepted edge action'
         assert after.count('EDGE_ACTION_'+edge)>before.count('EDGE_ACTION_'+edge), edge+' action missing'
-        assert find(text='断开') is not None
+        assert find(desc='断开连接') is not None
     overlays=shell(a.target,'cmd','overlay','list')
     nav=next((line.split()[-1] for line in overlays.splitlines() if line.startswith('[x]') and '.navbar.' in line),None)
     try:
@@ -326,7 +330,7 @@ def verify_controls():
         root=dump()
         n=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务']]
         status=next(node for node in root.iter('node') if '已连接' in node.get('text',''))
-        exit_bounds=bounds(find(text='断开',root=root))
+        exit_bounds=bounds(find(desc='断开连接',root=root))
         assert len({v[1] for v in n})==1 and all(abs((v[1]+v[3])//2-(exit_bounds[1]+exit_bounds[3])//2)<12 for v in n)
         assert bounds(status)[2]<=n[0][0] and exit_bounds[0]>=n[-1][2]
         screenshot('13-bottom-navigation')
@@ -362,7 +366,7 @@ def verify_controls():
             assert 'TOUCH ' not in logs()
             record('black letterbox taps do not become remote edge touches')
             shell(a.client,'input','keyevent',4); assert_log('BACK 4')
-            assert find(text='断开') is not None
+            assert find(desc='断开连接') is not None
             record('local Back still reaches target and keeps session connected')
         shell(a.target,'cmd','statusbar','collapse')
         shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
@@ -493,8 +497,9 @@ def verify_configs():
         top();tap('切换配置  ▾');return dump()
     def choose(name):
         root=picker()
-        click(next(n for n in root.iter('node') if n.get('text','').startswith(name+'\n')))
-        assert find(text='使用') is None
+        click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n')))
+        tap('使用配置')
+        assert find(text='使用配置') is None
     def expect(profile):
         roots=[top(),bottom()]
         nodes=[n for root in roots for n in root.iter('node')]
@@ -506,9 +511,9 @@ def verify_configs():
             node=next(n for n in nodes if n.get('text')==text)
             assert node.get('checked')==str(profile.get(key,key!='viewOnly')).lower(), key
     def remove(name, confirm=True):
-        picker();tap('删除配置');root=dump()
-        click(next(n for n in root.iter('node') if n.get('text','').startswith(name+'\n')))
-        tap('删除' if confirm else '取消')
+        root=picker()
+        click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n')))
+        tap('删除');tap('删除配置' if confirm else '取消');tap('取消')
     name_a=test_name+'-A';name_b=test_name+'-B'
     # Existing stored objects retain exactly the same schema and values on upgrade.
     old=snapshot()
@@ -524,9 +529,9 @@ def verify_configs():
     switches(False,True,False);save(name_b,'second-device.example:5566')
     config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False)
     root=picker()
-    assert find(text=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
-    assert find(text=name_b+'\nsecond-device.example:5566',root=root) is not None
-    screenshot('18-connection-picker');tap('关闭')
+    assert find(desc=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
+    assert find(desc=name_b+'\nsecond-device.example:5566',root=root) is not None
+    screenshot('18-connection-picker');tap('取消')
     choose(name_a);expect(config_a);choose(name_b);expect(config_b)
     record('two independent hosts restore address, port, codec, all video parameters and all switches with one selection')
     choose(name_a);tap('高清');top();tap('保存配置')
@@ -551,6 +556,96 @@ def verify_configs():
     remove(name_a)
 
 
+def verify_appearance():
+    def bounds(node):
+        assert node is not None
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    def state():
+        raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
+        values={n.get('name'):n.text for n in ET.fromstring(raw)}
+        return json.loads(values.get('profiles','[]')),json.loads(values.get('last','{}'))
+    def picker():
+        top();tap('切换配置  ▾');return dump()
+    def row(name, root=None):
+        if root is None:root=dump()
+        return next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n'))
+    def save(name):
+        top();tap('保存配置');click(find(desc='配置名称'))
+        shell(a.client,'input','keyevent','KEYCODE_MOVE_END')
+        shell(a.client,'input','keyevent',*(['KEYCODE_DEL']*100))
+        shell(a.client,'input','text',name);tap('保存')
+    before,_=state();name_a=test_name+'-A';name_b=test_name+'-B'
+    tap('省流');save(name_a);top();edit('设备 IP / 主机名','spare-phone.example');edit('ADB 端口','5566');save(name_b)
+    root=picker();assert row(name_b,root).get('selected')=='true'
+    click(row(name_a,root));root=dump()
+    assert row(name_a,root).get('selected')=='true' and row(name_b,root).get('selected')=='false'
+    assert state()[1]['name']==name_b, 'Highlighting a row applied it without confirmation'
+    screenshot('21-config-highlight');tap('取消')
+    assert state()[1]['name']==name_b
+    root=picker();assert row(name_b,root).get('selected')=='true'
+    click(row(name_a,root));tap('使用配置')
+    assert state()[1]['name']==name_a
+    record('custom picker highlights exactly one row; cancel preserves current settings; explicit confirmation switches host')
+    root=picker();click(row(name_b,root));tap('删除')
+    assert find(text='删除「'+name_b+'」？') is not None
+    screenshot('22-delete-confirmation')
+    assert any(p['name']==name_b for p in state()[0]), 'Delete happened before second confirmation'
+    tap('取消');root=dump()
+    assert row(name_b,root).get('selected')=='true'
+    assert any(p['name']==name_b for p in state()[0])
+    tap('使用配置');assert state()[1]['name']==name_b
+    root=picker();assert row(name_b,root).get('selected')=='true'
+    tap('删除');tap('删除配置');profiles,last=state()
+    assert not any(p['name']==name_b for p in profiles)
+    assert last['name']=='' and last['host']=='spare-phone.example' and last['port']==5566
+    root=dump();assert find(text='使用配置',root=root).get('enabled')=='false' and find(text='删除',root=root).get('enabled')=='false'
+    assert all(p in profiles for p in before)
+    click(row(name_a,root));tap('使用配置')
+    record('delete requires a second confirmation; cancel keeps selection; deleting the active config clears its name and preserves other hosts')
+    picker();shell(a.client,'settings','put','system','accelerometer_rotation',0);shell(a.client,'settings','put','system','user_rotation',1)
+    time.sleep(.8);root=dump()
+    assert root.get('rotation')=='1' and row(name_a,root).get('selected')=='true'
+    for title in ['取消','删除','使用配置']:
+        l,t,r,b=bounds(find(text=title,root=root));assert 0<=l<r<=2340 and 0<=t<b<=1080
+    screenshot('23-config-landscape')
+    shell(a.client,'settings','put','system','user_rotation',0);time.sleep(.8)
+    tap('删除');tap('删除配置');tap('取消')
+    assert state()[0]==before
+    record('picker survives rotation with selection and footer visible; test configs removed without changing existing saved data')
+    # Confirm that Android Launcher actually renders the new adaptive phone icon.
+    shell(a.client,'input','keyevent','KEYCODE_HOME');time.sleep(.6)
+    shell(a.client,'input','swipe',540,2140,540,650,350)
+    for attempt in range(6):
+        root=dump();icon=find(text='远控 · scrcpy',root=root)
+        if icon is not None:break
+        shell(a.client,'input','swipe',1030,2050,1030,650,350)
+    assert icon is not None, 'Launcher app entry missing'
+    screenshot('24-launcher-icon');click(icon);bottom()
+    top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));connect()
+    root=wait_connected();exit=find(desc='断开连接',root=root);keyboard=find(desc='虚拟键盘',root=root)
+    assert exit.get('class')==keyboard.get('class')=='android.widget.ImageButton'
+    eb,kb=bounds(exit),bounds(keyboard)
+    assert eb[1]==kb[1] and eb[3]==kb[3] and eb[2]-eb[0]==kb[2]-kb[0] and kb[2]<eb[0]
+    assert find(text='断开',root=root) is None
+    screenshot('25-icon-controls')
+    shell(a.client,'wm','size','880x1900');time.sleep(.6)
+    root=wait_connected();nav=bounds(find(desc='最近任务',root=root));kb=bounds(find(desc='虚拟键盘',root=root));eb=bounds(find(desc='断开连接',root=root))
+    assert nav[2]<=kb[0] and kb[2]<eb[0] and eb[2]<=880, (nav,kb,eb)
+    screenshot('26-compact-icon-controls');shell(a.client,'wm','size','reset');time.sleep(.6)
+    click(find(desc='断开连接'))
+    assert find(text='断开连接？') is not None
+    screenshot('27-disconnect-confirmation');tap('取消');wait_connected()
+    assert re.search(r'(^|\s)com\.genymobile\.scrcpy\.Server(\s|$)',shell(a.target,'ps','-A','-o','ARGS'),re.M)
+    record('disconnect icon requires confirmation; cancelling keeps the live remote session')
+    click(find(desc='断开连接'));tap('确认断开');bottom()
+    end=time.monotonic()+8
+    while time.monotonic()<end:
+        if not re.search(r'(^|\s)com\.genymobile\.scrcpy\.Server(\s|$)',shell(a.target,'ps','-A','-o','ARGS'),re.M):break
+        time.sleep(.2)
+    else:raise AssertionError('Server survived the disconnect icon action')
+    record('launcher phone icon renders; keyboard and disconnect share icon-button style, fit 320 dp width, and disconnect stops remote server')
+
+
 try:
     adb(a.client, 'install', '-r', ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
     adb(a.target, 'install', '-r', ROOT / 'validation/probe/build/outputs/apk/debug/probe-debug.apk')
@@ -570,6 +665,9 @@ try:
         sys.exit(0)
     if find(text='展示虚拟按键').get('checked') == 'false':
         tap('展示虚拟按键')
+    if a.phase == 'appearance':
+        verify_appearance()
+        sys.exit(0)
     if a.phase == 'configs':
         verify_configs()
         sys.exit(0)
@@ -598,8 +696,9 @@ try:
         bottom()
         top(); tap('切换配置  ▾')
         root = dump()
-        chosen = next(n for n in root.iter('node') if n.get('text', '').startswith(test_name + '\n'))
+        chosen = next(n for n in root.iter('node') if n.get('content-desc', '').startswith(test_name + '\n'))
         click(chosen)
+        tap('使用配置')
         bottom()
         assert find(text='1280') is not None
         assert find(text='2') is not None
@@ -742,7 +841,7 @@ except Exception:
     (a.output / 'client-log.txt').write_text(adb(a.client, 'logcat', '-d', '-s', 'ScrcpySession', 'ScrcpyServer'))
     raise
 finally:
-    if a.phase == 'ui':
+    if a.phase in ['ui','appearance']:
         shell(a.client, 'wm', 'size', 'reset')
     for (serial,key), value in rotation_settings.items():
         try:

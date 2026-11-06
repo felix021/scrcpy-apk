@@ -2,6 +2,7 @@ package cn.felix021.scrcpy;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -9,6 +10,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -16,6 +18,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
@@ -27,6 +30,7 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.Spinner;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -47,13 +51,14 @@ public final class MainActivity extends Activity {
     private int generation, videoWidth, videoHeight;
     private FrameLayout videoArea;
     private SurfaceView surface;
-    private TextView connectionStatus;
+    private TextView connectionStatus, configLabel;
     private String errorMessage;
     private RemoteInputView remoteInput;
     private LinearLayout mirrorBody;
     private RemoteKeyboard remoteKeyboard;
     private ImageButton keyboardToggle;
     private boolean keyboardVisible;
+    private Dialog disconnectDialog;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -133,12 +138,13 @@ public final class MainActivity extends Activity {
             error.setBackground(background(0xff37272b, 12)); add(page, error, -2); gap(page, 10); errorMessage = null;
         }
         LinearLayout device = card(page);
-        add(device, label(profile.name.isEmpty() ? "连接配置" : "连接配置 · " + profile.name, 12, MUTED), -2); gap(device, 8);
+        configLabel=label(profile.name.isEmpty() ? "连接配置" : "连接配置 · " + profile.name, 12, MUTED);
+        add(device, configLabel, -2); gap(device, 8);
         LinearLayout configs = row();
         Button load = button("切换配置  ▾", false), save = button("保存配置", false);
         equal(configs, load, false); equal(configs, save, true);
         load.setHeight(dp(40)); save.setHeight(dp(40)); add(device, configs, -2); gap(device, 10);
-        save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles(false));
+        save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles());
         LinearLayout address = row(); LinearLayout hostGroup = column(), portGroup = column();
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(0, -2, 1); hp.setMarginEnd(dp(10));
         address.addView(hostGroup, hp); address.addView(portGroup, new LinearLayout.LayoutParams(dp(80), -2));
@@ -221,23 +227,126 @@ public final class MainActivity extends Activity {
             } catch (Exception e) { toast("保存失败：" + e.getMessage()); }
         })); dialog.show();
     }
-    private void loadProfiles(boolean deleting) {
-        JSONArray saved = savedProfiles(); if (saved.length() == 0) { toast("还没有保存的连接配置"); return; }
-        String[] labels = new String[saved.length()];
-        for (int i = 0; i < labels.length; i++) {
-            Profile p = Profile.from(saved.optJSONObject(i)); labels[i] = p.name + "\n" + p.host + ":" + p.port;
-        }
-        AlertDialog.Builder picker = new AlertDialog.Builder(this).setTitle(deleting ? "删除连接配置" : "切换连接配置")
-                .setItems(labels, (dialog, which) -> {
-                    Profile p = Profile.from(saved.optJSONObject(which));
-                    if (!deleting) { persist(p); showForm(); return; }
-                    new AlertDialog.Builder(this).setTitle("删除「" + p.name + "」？").setMessage(p.host + ":" + p.port)
-                            .setPositiveButton("删除", (d, w) -> {
-                                saved.remove(which); prefs.edit().putString("profiles", saved.toString()).apply(); toast("连接配置已删除");
-                            }).setNegativeButton("取消", null).show();
-                }).setNegativeButton("关闭", null);
-        if (!deleting) picker.setNeutralButton("删除配置", (dialog, which) -> loadProfiles(true));
-        picker.show();
+    private LinearLayout configPanel(String title, String description) {
+        LinearLayout panel = column(); panel.setPadding(dp(20), dp(20), dp(20), dp(20));
+        panel.setBackground(background(CARD, 22));
+        TextView heading = label(title, 20, TEXT); heading.setTypeface(null, Typeface.BOLD); add(panel, heading, -2);
+        gap(panel, 8); add(panel, label(description, 12, MUTED), -2); gap(panel, 16);
+        return panel;
+    }
+    private Dialog showConfigDialog(LinearLayout panel, int height) {
+        Dialog dialog = new Dialog(this); dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setOwnerActivity(this); dialog.setContentView(panel); dialog.setCanceledOnTouchOutside(true);
+        Window window = dialog.getWindow();
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        WindowManager.LayoutParams attrs = window.getAttributes(); attrs.dimAmount = .68f; window.setAttributes(attrs);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        panel.setTag(height);
+        panel.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> resizeConfigDialog(dialog,panel));
+        dialog.show(); resizeConfigDialog(dialog,panel); return dialog;
+    }
+    private void resizeConfigDialog(Dialog dialog, LinearLayout panel) {
+        int width = Math.min(dp(440), getResources().getDisplayMetrics().widthPixels - dp(32));
+        int desired = (Integer) panel.getTag();
+        int height = desired < 0 ? desired : Math.min(desired, getResources().getDisplayMetrics().heightPixels - dp(64));
+        Window window = dialog.getWindow(); WindowManager.LayoutParams attrs = window.getAttributes();
+        if (attrs.width != width || attrs.height != height) window.setLayout(width,height);
+    }
+    private void configAction(LinearLayout row, Button button, float weight, boolean last) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,dp(44),weight);
+        if (!last) lp.setMarginEnd(dp(8)); row.addView(button,lp);
+    }
+    private boolean isCurrentConfig(Profile p) {
+        return !p.name.isEmpty() && p.name.equals(profile.name) && p.host.equals(profile.host) && p.port == profile.port;
+    }
+    private void loadProfiles() {
+        JSONArray saved = savedProfiles();
+        LinearLayout panel = configPanel("切换连接配置", "选择设备后确认，主机、画面与控制设置一并切换。");
+        ScrollView scroll = new ScrollView(this); scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout list = column(); scroll.addView(list,new ScrollView.LayoutParams(-1,-2));
+        panel.addView(scroll,new LinearLayout.LayoutParams(-1,0,1)); gap(panel,16);
+        LinearLayout actions = row();
+        Button cancel = button("取消",false), delete = button("删除",false), use = button("使用配置",true);
+        delete.setTextColor(0xffffb6aa); delete.setBackground(background(0xff352a31,14));
+        configAction(actions,cancel,1,false); configAction(actions,delete,1,false); configAction(actions,use,1.4f,true);
+        add(panel,actions,-2);
+        Dialog picker = showConfigDialog(panel,dp(168)+Math.max(dp(96),saved.length()*dp(76)));
+        final int[] selected = {-1};
+        for (int i=0;i<saved.length();i++) if (isCurrentConfig(Profile.from(saved.optJSONObject(i)))) selected[0]=i;
+        java.util.ArrayList<LinearLayout> rows = new java.util.ArrayList<>();
+        java.util.ArrayList<ImageView> marks = new java.util.ArrayList<>();
+        Runnable selection = () -> {
+            for (int i=0;i<rows.size();i++) {
+                boolean active = i==selected[0];
+                GradientDrawable bg = background(active ? 0xff203e3d : 0xff101c25,14);
+                bg.setStroke(dp(1),active ? ACCENT : 0xff2b3c47);
+                rows.get(i).setBackground(bg); rows.get(i).setSelected(active);
+                marks.get(i).setImageResource(active ? R.drawable.ic_check_circle : R.drawable.ic_circle_outline);
+            }
+            boolean enabled = selected[0]>=0;
+            use.setEnabled(enabled); use.setAlpha(enabled ? 1 : .35f);
+            delete.setEnabled(enabled); delete.setAlpha(enabled ? 1 : .35f);
+        };
+        Runnable rebuild = () -> {
+            list.removeAllViews(); rows.clear(); marks.clear();
+            if (saved.length()==0) {
+                TextView empty = label("还没有保存的连接配置\n在主界面填写设备地址后，点击「保存配置」。",13,MUTED);
+                empty.setGravity(Gravity.CENTER); empty.setPadding(dp(8),dp(16),dp(8),dp(16)); add(list,empty,-2);
+            }
+            for (int i=0;i<saved.length();i++) {
+                final int index=i; Profile p=Profile.from(saved.optJSONObject(i));
+                LinearLayout entry=row(); entry.setPadding(dp(12),dp(12),dp(12),dp(12));
+                entry.setContentDescription(p.name+"\n"+p.host+":"+p.port); entry.setFocusable(true); entry.setClickable(true);
+                ImageView mark=new ImageView(this); mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(22),dp(22));mp.setMarginEnd(dp(12));entry.addView(mark,mp);
+                LinearLayout details=column();
+                TextView name=label(p.name.isEmpty()?p.host:p.name,15,TEXT);name.setTypeface(null,Typeface.BOLD);
+                name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);add(details,name,-2);gap(details,3);
+                TextView address=label(p.host+":"+p.port,12,MUTED);address.setSingleLine(true);
+                address.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);add(details,address,-2);
+                entry.addView(details,new LinearLayout.LayoutParams(0,-2,1));
+                if (isCurrentConfig(p)) {
+                    TextView badge=label("当前",10,ACCENT);badge.setPadding(dp(6),dp(4),dp(6),dp(4));
+                    badge.setBackground(background(0xff25453f,6));badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                    LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-2,-2);bp.setMarginStart(dp(8));entry.addView(badge,bp);
+                }
+                entry.setOnClickListener(v -> {selected[0]=index;selection.run();});
+                rows.add(entry); marks.add(mark);add(list,entry,-2);if(i<saved.length()-1)gap(list,8);
+            }
+            selection.run(); panel.setTag(dp(168)+Math.max(dp(96),saved.length()*dp(76))); resizeConfigDialog(picker,panel);
+        };
+        cancel.setOnClickListener(v -> picker.dismiss());
+        use.setOnClickListener(v -> {
+            if (selected[0]<0) return;
+            persist(Profile.from(saved.optJSONObject(selected[0]))); picker.dismiss(); showForm();
+        });
+        delete.setOnClickListener(v -> {
+            if (selected[0]<0) return;
+            final int index=selected[0]; Profile p=Profile.from(saved.optJSONObject(index));
+            LinearLayout confirmPanel=configPanel("删除「"+p.name+"」？",p.host+":"+p.port+"\n将删除这台设备保存的连接设置。");
+            LinearLayout confirmActions=row();Button keep=button("取消",false), remove=button("删除配置",false);
+            remove.setTextColor(BG);remove.setBackground(background(0xffef9292,14));
+            configAction(confirmActions,keep,1,false);configAction(confirmActions,remove,1.4f,true);add(confirmPanel,confirmActions,-2);
+            Dialog confirm=showConfigDialog(confirmPanel,-2);
+            keep.setOnClickListener(w -> confirm.dismiss());
+            remove.setOnClickListener(w -> {
+                saved.remove(index);prefs.edit().putString("profiles",saved.toString()).apply();
+                if (isCurrentConfig(p)) {
+                    profile.name="";configLabel.setText("连接配置");
+                    Profile last=lastProfile();
+                    if(last.name.equals(p.name) && last.host.equals(p.host) && last.port==p.port){last.name="";persist(last);}
+                }
+                selected[0]=-1;confirm.dismiss();rebuild.run();toast("连接配置已删除");
+            });
+        });
+        rebuild.run();
+        panel.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+            if ((r-l!=or-ol || b-t!=ob-ot) && selected[0]>=0 && selected[0]<rows.size()) {
+                View chosen=rows.get(selected[0]);
+                chosen.requestRectangleOnScreen(new Rect(0,0,chosen.getWidth(),chosen.getHeight()),true);
+            }
+        });
     }
 
     private void showMirror(Profile p) {
@@ -293,15 +402,21 @@ public final class MainActivity extends Activity {
         LinearLayout actions=row();
         keyboardToggle=iconButton(R.drawable.ic_keyboard,"虚拟键盘");keyboardToggle.setEnabled(!p.viewOnly);
         keyboardToggle.setAlpha(p.viewOnly?.35f:1);keyboardToggle.setOnClickListener(v -> showKeyboard(!keyboardVisible));
-        actions.addView(keyboardToggle,new LinearLayout.LayoutParams(dp(36),dp(44)));
-        Button exit=button("断开",false);exit.setTextSize(11);exit.setPadding(0,0,0,0);
-        actions.addView(exit,new LinearLayout.LayoutParams(dp(40),dp(44)));
-        exit.setOnClickListener(v -> disconnect(null));
+        LinearLayout.LayoutParams keyboardParams=new LinearLayout.LayoutParams(dp(44),dp(44));keyboardParams.setMarginEnd(dp(4));
+        actions.addView(keyboardToggle,keyboardParams);
+        ImageButton exit=iconButton(R.drawable.ic_disconnect,"断开连接");
+        actions.addView(exit,new LinearLayout.LayoutParams(dp(44),dp(44)));
+        exit.setOnClickListener(v -> confirmDisconnect());
         dock.addView(actions,new FrameLayout.LayoutParams(-2,-1,Gravity.END|Gravity.CENTER_VERTICAL));
         dock.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
             FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)connectionStatus.getLayoutParams();
             int width=Math.max(dp(30),(r-l-(p.showNavigation?dp(152):0))/2-dp(8));
             if(lp.width!=width){lp.width=width;connectionStatus.setLayoutParams(lp);}
+            int actionWidth=Math.min(dp(44),Math.max(dp(24),(width-dp(4))/2));
+            for(int i=0;i<actions.getChildCount();i++) {
+                LinearLayout.LayoutParams ap=(LinearLayout.LayoutParams)actions.getChildAt(i).getLayoutParams();
+                if(ap.width!=actionWidth){ap.width=actionWidth;actions.getChildAt(i).setLayoutParams(ap);}
+            }
         });
         videoArea.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> fitVideo());
         surface.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> updateInputFrame());
@@ -445,7 +560,22 @@ public final class MainActivity extends Activity {
         super.onWindowFocusChanged(focus);
         if (focus && mirroring) enterRemoteFullscreen();
     }
+    private void confirmDisconnect() {
+        if (!mirroring || disconnectDialog!=null) return;
+        remoteInput.cancel(); final int token=generation;
+        LinearLayout panel=configPanel("断开连接？","确认后将结束当前远程控制。");
+        LinearLayout actions=row();Button cancel=button("取消",false), confirm=button("确认断开",false);
+        confirm.setTextColor(BG);confirm.setBackground(background(0xffef9292,14));
+        configAction(actions,cancel,1,false);configAction(actions,confirm,1.4f,true);add(panel,actions,-2);
+        Dialog dialog=showConfigDialog(panel,-2);disconnectDialog=dialog;
+        dialog.setOnDismissListener(ignored -> {if(disconnectDialog==dialog)disconnectDialog=null;});
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        confirm.setOnClickListener(v -> {
+            dialog.dismiss();if(mirroring && generation==token)disconnect(null);
+        });
+    }
     private void disconnect(String error) {
+        Dialog dialog=disconnectDialog;disconnectDialog=null;if(dialog!=null)dialog.dismiss();
         if(remoteInput!=null)remoteInput.cancel();
         if(remoteKeyboard!=null)remoteKeyboard.reset();
         generation++; mirroring=false;keyboardVisible=false;
