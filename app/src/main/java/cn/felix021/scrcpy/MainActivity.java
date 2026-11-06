@@ -1,7 +1,6 @@
 package cn.felix021.scrcpy;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
@@ -13,6 +12,11 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.util.TypedValue;
+import android.view.ViewGroup;
+import android.widget.AbsListView;
 import android.view.Gravity;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -22,6 +26,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -58,7 +63,7 @@ public final class MainActivity extends Activity {
     private RemoteKeyboard remoteKeyboard;
     private ImageButton keyboardToggle;
     private boolean keyboardVisible;
-    private Dialog disconnectDialog;
+    private Dialog disconnectDialog, textDialog;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -168,7 +173,24 @@ public final class MainActivity extends Activity {
         fps = field(c, "帧率上限 · FPS", "" + profile.fps, true);
         add(d, label("视频编码", 11, MUTED), -2); gap(d, 4);
         codec = new Spinner(this); codec.setContentDescription("视频编码");
-        ArrayAdapter<String> codecs = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{"H.264", "H.265"});
+        ArrayAdapter<String> codecs = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, new String[]{"H.264", "H.265"}) {
+            @Override public View getView(int position,View convert,ViewGroup parent) {
+                TextView value=label(getItem(position),16,TEXT);value.setSingleLine(true);value.setGravity(Gravity.CENTER_VERTICAL);
+                value.setPadding(dp(4),0,0,0);return value;
+            }
+            @Override public View getDropDownView(int position,View convert,ViewGroup parent) {
+                boolean selected=position==codec.getSelectedItemPosition();
+                LinearLayout option=row();option.setPadding(dp(12),0,dp(12),0);
+                option.setBackground(background(selected?0xff203e3d:CARD,10));
+                option.setLayoutParams(new AbsListView.LayoutParams(-1,dp(48)));
+                option.addView(label(getItem(position),15,selected?ACCENT:TEXT),new LinearLayout.LayoutParams(0,-2,1));
+                ImageView mark=new ImageView(MainActivity.this);
+                mark.setImageResource(selected?R.drawable.ic_check_circle:R.drawable.ic_circle_outline);
+                mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(20),dp(20));mp.setMarginStart(dp(8));option.addView(mark,mp);
+                return option;
+            }
+        };
         codec.setAdapter(codecs); codec.setSelection(profile.codec.equals("h265") ? 1 : 0);
         codec.setBackground(getDrawable(R.drawable.spinner_background)); codec.setPadding(dp(8), 0, dp(30), 0);
         codec.setPopupBackgroundDrawable(background(CARD, 12)); add(d, codec, 44);
@@ -210,22 +232,54 @@ public final class MainActivity extends Activity {
     }
     private void saveProfile() {
         final Profile p;
-        try { p = readForm(); } catch (Exception e) { toast(e.getMessage()); return; }
-        EditText name = new EditText(this); name.setSingleLine(true); name.setContentDescription("配置名称");
-        boolean sameDevice = p.host.equals(profile.host) && p.port == profile.port;
-        name.setText(!p.name.isEmpty() && sameDevice ? p.name : p.host + ":" + p.port); name.setSelectAllOnFocus(true);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("保存连接配置").setMessage("保存主机、端口、画面参数及全部控制选项。同名配置会更新。")
-                .setView(name).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String n = name.getText().toString().trim(); if (n.isEmpty()) { name.setError("请输入名称"); return; }
-            p.name = n;
+        try { p=readForm(); } catch(Exception e) { toast(e.getMessage());return; }
+        LinearLayout body=configPanel("保存连接配置","保存主机、端口、画面参数及全部控制选项。同名配置会更新。");
+        EditText name=field(body,"配置名称",p.name.isEmpty()?p.host+":"+p.port:p.name,false);
+        name.setInputType(InputType.TYPE_CLASS_TEXT);name.setSingleLine(true);
+        name.setImeOptions(EditorInfo.IME_ACTION_DONE|EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        name.setHint("例如：工作手机");name.setHintTextColor(MUTED);
+        TextView error=inputError(body,name);
+        LinearLayout actions=row();Button cancel=button("取消",false),save=button("保存",true);
+        configAction(actions,cancel,1,false);configAction(actions,save,1.4f,true);
+        Dialog dialog=showConfigDialog(editorPanel(body,actions),dp(260));
+        cancel.setOnClickListener(v -> dismissEditorDialog(dialog));
+        save.setOnClickListener(v -> {
+            String n=name.getText().toString().trim();
+            if(n.isEmpty()){showInputError(error,"请输入配置名称");return;}
+            p.name=n;
             try {
-                JSONArray old = savedProfiles(), result = new JSONArray();
-                for (int i = 0; i < old.length(); i++) if (!old.getJSONObject(i).optString("name").equals(n)) result.put(old.getJSONObject(i));
-                result.put(p.json()); prefs.edit().putString("profiles", result.toString()).apply(); persist(p); profile = p;
-                dialog.dismiss(); showForm(); toast("已保存「" + n + "」");
-            } catch (Exception e) { toast("保存失败：" + e.getMessage()); }
-        })); dialog.show();
+                JSONArray old=savedProfiles(),result=new JSONArray();
+                for(int i=0;i<old.length();i++)if(!old.getJSONObject(i).optString("name").equals(n))result.put(old.getJSONObject(i));
+                result.put(p.json());prefs.edit().putString("profiles",result.toString()).apply();persist(p);
+                dismissEditorDialog(dialog);showForm();toast("已保存「"+n+"」");
+            } catch(Exception e){showInputError(error,"保存失败："+e.getMessage());}
+        });
+    }
+    private LinearLayout editorPanel(LinearLayout body, LinearLayout actions) {
+        LinearLayout panel=column();panel.setBackground(background(CARD,22));panel.setClipToOutline(true);
+        body.setBackground(null);body.setPadding(dp(20),dp(20),dp(20),dp(16));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);
+        scroll.addView(body,new ScrollView.LayoutParams(-1,-2));
+        panel.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        actions.setPadding(dp(20),0,dp(20),dp(20));add(panel,actions,-2);return panel;
+    }
+    private TextView inputError(LinearLayout body, EditText editor) {
+        TextView error=label("",12,0xffffb6aa);error.setPadding(0,dp(8),0,0);error.setVisibility(View.GONE);add(body,error,-2);
+        editor.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int start,int count,int after) { }
+            @Override public void onTextChanged(CharSequence s,int start,int before,int count) { error.setVisibility(View.GONE); }
+            @Override public void afterTextChanged(Editable s) { }
+        });return error;
+    }
+    private void showInputError(TextView error, String message) {
+        error.setText(message);error.setVisibility(View.VISIBLE);
+        error.post(() -> error.requestRectangleOnScreen(new Rect(0,0,error.getWidth(),error.getHeight()),true));
+    }
+    private void dismissEditorDialog(Dialog dialog) {
+        if(dialog==null)return;
+        View decor=dialog.getWindow().getDecorView();
+        if(decor.getWindowToken()!=null)((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(decor.getWindowToken(),0);
+        dialog.dismiss();
     }
     private LinearLayout configPanel(String title, String description) {
         LinearLayout panel = column(); panel.setPadding(dp(20), dp(20), dp(20), dp(20));
@@ -234,24 +288,38 @@ public final class MainActivity extends Activity {
         gap(panel, 8); add(panel, label(description, 12, MUTED), -2); gap(panel, 16);
         return panel;
     }
+    private final class DialogFrame extends FrameLayout {
+        DialogFrame(LinearLayout panel) {
+            super(MainActivity.this);addView(panel,new FrameLayout.LayoutParams(-1,-1));
+        }
+        @Override protected void onMeasure(int widthSpec,int heightSpec) {
+            int desired=(Integer)getChildAt(0).getTag();
+            if(desired>=0) {
+                int available=MeasureSpec.getMode(heightSpec)==MeasureSpec.UNSPECIFIED?desired:MeasureSpec.getSize(heightSpec);
+                heightSpec=MeasureSpec.makeMeasureSpec(Math.min(desired,available),MeasureSpec.EXACTLY);
+            }
+            super.onMeasure(widthSpec,heightSpec);
+        }
+    }
     private Dialog showConfigDialog(LinearLayout panel, int height) {
         Dialog dialog = new Dialog(this); dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setOwnerActivity(this); dialog.setContentView(panel); dialog.setCanceledOnTouchOutside(true);
+        panel.setTag(height);
+        dialog.setOwnerActivity(this); dialog.setContentView(new DialogFrame(panel)); dialog.setCanceledOnTouchOutside(true);
         Window window = dialog.getWindow();
         window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         WindowManager.LayoutParams attrs = window.getAttributes(); attrs.dimAmount = .68f; window.setAttributes(attrs);
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        panel.setTag(height);
-        panel.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> resizeConfigDialog(dialog,panel));
-        dialog.show(); resizeConfigDialog(dialog,panel); return dialog;
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        window.getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if(dialog.isShowing())resizeConfigDialog(dialog);
+        });
+        dialog.show(); resizeConfigDialog(dialog); return dialog;
     }
-    private void resizeConfigDialog(Dialog dialog, LinearLayout panel) {
-        int width = Math.min(dp(440), getResources().getDisplayMetrics().widthPixels - dp(32));
-        int desired = (Integer) panel.getTag();
-        int height = desired < 0 ? desired : Math.min(desired, getResources().getDisplayMetrics().heightPixels - dp(64));
-        Window window = dialog.getWindow(); WindowManager.LayoutParams attrs = window.getAttributes();
-        if (attrs.width != width || attrs.height != height) window.setLayout(width,height);
+    private void resizeConfigDialog(Dialog dialog) {
+        int width=Math.min(dp(440),getResources().getDisplayMetrics().widthPixels-dp(32));
+        Window window=dialog.getWindow();WindowManager.LayoutParams attrs=window.getAttributes();
+        // WRAP_CONTENT lets Android supply the IME's available frame to the bounded content.
+        if(attrs.width!=width || attrs.height!=-2)window.setLayout(width,-2);
     }
     private void configAction(LinearLayout row, Button button, float weight, boolean last) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,dp(44),weight);
@@ -314,7 +382,7 @@ public final class MainActivity extends Activity {
                 entry.setOnClickListener(v -> {selected[0]=index;selection.run();});
                 rows.add(entry); marks.add(mark);add(list,entry,-2);if(i<saved.length()-1)gap(list,8);
             }
-            selection.run(); panel.setTag(dp(168)+Math.max(dp(96),saved.length()*dp(76))); resizeConfigDialog(picker,panel);
+            selection.run(); panel.setTag(dp(168)+Math.max(dp(96),saved.length()*dp(76))); resizeConfigDialog(picker);
         };
         cancel.setOnClickListener(v -> picker.dismiss());
         use.setOnClickListener(v -> {
@@ -382,7 +450,9 @@ public final class MainActivity extends Activity {
         });
         remoteKeyboard.setVisibility(View.GONE);mirrorBody.addView(remoteKeyboard);
         FrameLayout dock = new FrameLayout(this); dock.setPadding(dp(8),0,dp(8),0); add(root,dock,48);
-        connectionStatus=label("正在连接…",10,ACCENT);connectionStatus.setSingleLine(true);
+        connectionStatus=label("正在连接…",9,ACCENT);connectionStatus.setSingleLine(false);connectionStatus.setMaxLines(3);
+        connectionStatus.setIncludeFontPadding(false);connectionStatus.setLineSpacing(0,1.05f);
+        connectionStatus.setAutoSizeTextTypeUniformWithConfiguration(8,10,1,TypedValue.COMPLEX_UNIT_SP);
         connectionStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
         connectionStatus.setGravity(Gravity.CENTER_VERTICAL);
         dock.addView(connectionStatus,new FrameLayout.LayoutParams(dp(90),-1,Gravity.START|Gravity.CENTER_VERTICAL));
@@ -409,10 +479,17 @@ public final class MainActivity extends Activity {
         exit.setOnClickListener(v -> confirmDisconnect());
         dock.addView(actions,new FrameLayout.LayoutParams(-2,-1,Gravity.END|Gravity.CENTER_VERTICAL));
         dock.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+            int dockWidth=r-l,navWidth=navigation.getMeasuredWidth();
+            float start=(dockWidth-navWidth)/2f;
+            // Compensate asymmetric cutouts so the three keys stay on the window's centerline.
+            float shift=(root.getPaddingRight()-root.getPaddingLeft())/2f;
+            shift=Math.max(dock.getPaddingLeft()-start,Math.min(shift,dockWidth-dock.getPaddingRight()-start-navWidth));
+            navigation.setTranslationX(shift);
+            int leftSpace=Math.max(0,Math.round(start+shift)-dock.getPaddingLeft()-dp(8));
+            int rightSpace=Math.max(0,Math.round(dockWidth-dock.getPaddingRight()-start-shift-navWidth)-dp(8));
             FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)connectionStatus.getLayoutParams();
-            int width=Math.max(dp(30),(r-l-(p.showNavigation?dp(152):0))/2-dp(8));
-            if(lp.width!=width){lp.width=width;connectionStatus.setLayoutParams(lp);}
-            int actionWidth=Math.min(dp(44),Math.max(dp(24),(width-dp(4))/2));
+            if(lp.width!=leftSpace){lp.width=leftSpace;connectionStatus.setLayoutParams(lp);}
+            int actionWidth=Math.min(dp(44),Math.max(dp(24),(rightSpace-dp(4))/2));
             for(int i=0;i<actions.getChildCount();i++) {
                 LinearLayout.LayoutParams ap=(LinearLayout.LayoutParams)actions.getChildAt(i).getLayoutParams();
                 if(ap.width!=actionWidth){ap.width=actionWidth;actions.getChildAt(i).setLayoutParams(ap);}
@@ -456,9 +533,9 @@ public final class MainActivity extends Activity {
                 if (token != generation || session != null) return;
                 session = new ScrcpySession(MainActivity.this, p, holder.getSurface(), new ScrcpySession.Listener() {
                     private void ui(Runnable r) { runOnUiThread(() -> { if (token == generation) r.run(); }); }
-                    @Override public void status(String text) { ui(() -> connectionStatus.setText(text)); }
+                    @Override public void status(String text) { ui(() -> updateConnectionStatus(text)); }
                     @Override public void size(int w, int h) { ui(() -> { videoWidth = w; videoHeight = h; fitVideo(); }); }
-                    @Override public void ready(String device) { ui(() -> connectionStatus.setText("● " + (p.viewOnly ? "仅观看" : "已连接") + " · " + device)); }
+                    @Override public void ready(String device) { ui(() -> updateConnectionStatus("● " + (p.viewOnly ? "仅观看" : "已连接") + "\n" + device)); }
                     @Override public void error(String message) { ui(() -> disconnect("连接结束：" + message)); }
                 }); session.start();
             }
@@ -467,6 +544,9 @@ public final class MainActivity extends Activity {
                 if (token == generation && session != null) disconnect("画面已关闭，请重新连接");
             }
         });
+    }
+    private void updateConnectionStatus(String text) {
+        connectionStatus.setText(text);connectionStatus.setTooltipText(text.replace('\n',' '));
     }
     private void fitVideo() {
         if (!mirroring || videoWidth == 0 || videoArea.getWidth() == 0 || videoArea.getHeight() == 0) return;
@@ -510,18 +590,26 @@ public final class MainActivity extends Activity {
         keyboardToggle.setBackground(background(visible?0xff34594e:0xff17232d,8));updateMirrorLayout();
     }
     private void inputText() {
-        if(!mirroring || profile.viewOnly)return;
-        EditText editor=new EditText(this);editor.setTextColor(TEXT);editor.setMinLines(2);editor.setMaxLines(6);
+        if(!mirroring || profile.viewOnly || session==null || textDialog!=null)return;
+        remoteInput.cancel();final int token=generation;final ScrcpySession target=session;
+        LinearLayout body=configPanel("输入文字","使用本机输入法编辑，发送到远端。最多 64 KB 文本。");
+        add(body,label("文字内容",11,MUTED),-2);gap(body,4);
+        EditText editor=new EditText(this);editor.setTextColor(TEXT);editor.setTextSize(16);editor.setHintTextColor(MUTED);
+        editor.setPadding(dp(12),dp(10),dp(12),dp(10));editor.setBackground(background(0xff0e1921,10));
         editor.setHint("输入要发送到远端的文字");editor.setContentDescription("发送文本");
         editor.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("输入文字").setView(editor).setNegativeButton("取消",null).setPositiveButton("发送",null).create();
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                if(session!=null)session.paste(editor.getText().toString());
-                ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(editor.getWindowToken(),0);
-                dialog.dismiss();
-            } catch(IllegalArgumentException e){editor.setError(e.getMessage());}
-        }));dialog.show();
+        editor.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);editor.setGravity(Gravity.TOP);add(body,editor,120);
+        TextView error=inputError(body,editor);
+        LinearLayout actions=row();Button cancel=button("取消",false),send=button("发送",true);
+        configAction(actions,cancel,1,false);configAction(actions,send,1.4f,true);
+        Dialog dialog=showConfigDialog(editorPanel(body,actions),dp(320));textDialog=dialog;
+        dialog.setOnDismissListener(ignored -> {if(textDialog==dialog)textDialog=null;});
+        cancel.setOnClickListener(v -> dismissEditorDialog(dialog));
+        send.setOnClickListener(v -> {
+            if(!mirroring || generation!=token || session!=target){dismissEditorDialog(dialog);return;}
+            try {target.paste(editor.getText().toString());dismissEditorDialog(dialog);}
+            catch(IllegalArgumentException e){showInputError(error,e.getMessage());}
+        });
     }
     private void pasteClipboard() {
         if(!mirroring || session==null || profile.viewOnly)return;
@@ -576,6 +664,7 @@ public final class MainActivity extends Activity {
     }
     private void disconnect(String error) {
         Dialog dialog=disconnectDialog;disconnectDialog=null;if(dialog!=null)dialog.dismiss();
+        Dialog editor=textDialog;textDialog=null;dismissEditorDialog(editor);
         if(remoteInput!=null)remoteInput.cancel();
         if(remoteKeyboard!=null)remoteKeyboard.reset();
         generation++; mirroring=false;keyboardVisible=false;

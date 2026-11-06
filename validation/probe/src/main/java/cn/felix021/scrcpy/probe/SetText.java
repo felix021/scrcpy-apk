@@ -22,9 +22,15 @@ public final class SetText {
                 if(target==null)Thread.sleep(100);
             }
             if(target==null)throw new IllegalStateException("Text field missing");
-            Bundle bundle=new Bundle();bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,args[1]);
+            String value=args.length>2 && "--file".equals(args[1])
+                    ? new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(args[2])),java.nio.charset.StandardCharsets.UTF_8) : args[1];
+            Bundle bundle=new Bundle();bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value);
             if(!target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,bundle))throw new IllegalStateException("Text action rejected");
-        } finally {UiAutomation.class.getMethod("disconnect").invoke(automation);thread.quitSafely();}
+        } finally {
+            UiAutomation.class.getMethod("disconnect").invoke(automation);thread.quitSafely();thread.join(2000);
+        }
+        // app_process must exit before RuntimeInit tears down Binder under queued accessibility callbacks.
+        System.exit(0);
     }
     private static AccessibilityNodeInfo find(AccessibilityNodeInfo node,String description) {
         if(node==null)return null;

@@ -15,8 +15,8 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance'], default='all',
-               help='Run core, lifecycle, UI, controls, keyboard, configs, insets, or appearance checks')
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs'], default='all',
+               help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
@@ -646,6 +646,102 @@ def verify_appearance():
     record('launcher phone icon renders; keyboard and disconnect share icon-button style, fit 320 dp width, and disconnect stops remote server')
 
 
+def verify_dialogs(text_only=False):
+    def bounds(node):
+        assert node is not None, 'UI element missing'
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    def stored():
+        raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
+        values={n.get('name'):n.text for n in ET.fromstring(raw)}
+        return json.loads(values.get('profiles','[]')),json.loads(values.get('last','{}'))
+    def rotate(value):
+        shell(a.client,'settings','put','system','accelerometer_rotation',0)
+        shell(a.client,'settings','put','system','user_rotation',value);time.sleep(.7)
+    def set_text(desc,value):
+        path=a.output/'editor-input.txt';path.write_text(value)
+        adb(a.client,'push',path,'/data/local/tmp/scrcpy-editor-input.txt')
+        cmd='CLASSPATH=/data/local/tmp/scrcpy-validation.apk app_process / '+PROBE+'.SetText '+shlex.quote(desc)+' --file /data/local/tmp/scrcpy-editor-input.txt'
+        shell(a.client,cmd)
+    def keyboard_buttons(*titles):
+        root=dump();state=shell(a.client,'dumpsys','window')
+        frames=[(int(t),int(b)) for t,b in re.findall(r'type=ime frame=\[\d+,(\d+)\]\[\d+,(\d+)\][^\n]*visible=true',state) if int(b)>int(t)]
+        assert frames, 'Local IME did not open for the editor'
+        top=min(t for t,b in frames)
+        for title in titles:
+            l,t,r,b=bounds(find(text=title,root=root));assert 0<=t<b<=top, (title,(l,t,r,b),top)
+    def target_text():
+        result=shell(a.target,'uiautomator','dump','/sdcard/scrcpy-validation.xml')
+        assert 'dumped to:' in result
+        root=ET.fromstring(shell(a.target,'cat','/sdcard/scrcpy-validation.xml'))
+        return find(desc='验证输入框',root=root).get('text')
+    def dock(name):
+        root=wait_connected();window=bounds(root.find('node'))
+        back=bounds(find(desc='Back',root=root));home=bounds(find(desc='Home',root=root));recents=bounds(find(desc='最近任务',root=root))
+        status=next(n for n in root.iter('node') if '已连接' in n.get('text',''))
+        sb=bounds(status);kb=bounds(find(desc='虚拟键盘',root=root));exit=bounds(find(desc='断开连接',root=root))
+        mid=(window[0]+window[2])/2
+        assert abs((home[0]+home[2])/2-mid)<=2, (name,home,window)
+        assert abs((back[0]+recents[2])/2-mid)<=2, (name,back,recents,window)
+        assert sb[2]<=back[0] and recents[2]<=kb[0] and kb[2]<exit[0]<=window[2], (sb,back,recents,kb,exit)
+        assert '\n' in status.get('text','')
+        screenshot('30-dock-'+name)
+    before=stored();name=test_name+'-dialog'
+    adb(a.client,'push',ROOT/'validation/probe/build/outputs/apk/debug/probe-debug.apk','/data/local/tmp/scrcpy-validation.apk')
+    if not text_only:
+        top();tap('保存配置');click(find(desc='配置名称'));set_text('配置名称','');tap('保存')
+        assert find(text='请输入配置名称') is not None and stored()==before
+        screenshot('28-save-validation');set_text('配置名称','cancelled-draft');tap('取消');assert stored()==before
+        top();tap('保存配置');click(find(desc='配置名称'));set_text('配置名称',name)
+        keyboard_buttons('取消','保存');screenshot('29-save-keyboard-portrait')
+        rotate(1);keyboard_buttons('取消','保存');screenshot('29-save-keyboard-landscape')
+        tap('保存');rotate(0)
+        assert next(p for p in stored()[0] if p['name']==name)['host']==a.host
+        record('save dialog uses themed editor, rejects empty names inline, cancels without writing, and saves with IME open in both orientations')
+        bottom();click(find(desc='视频编码'))
+        root=dump();assert find(text='H.264',root=root) is not None and find(text='H.265',root=root) is not None
+        screenshot('29-codec-options');tap('H.265');assert find(text='H.265') is not None
+        click(find(desc='视频编码'));tap('H.264');tap('省流');connect()
+        dock('portrait')
+        shell(a.client,'wm','size','880x1900');time.sleep(.7);dock('compact')
+        shell(a.client,'wm','size','reset');time.sleep(.7);rotate(1);dock('landscape')
+        click(find(desc='虚拟键盘'));dock('landscape-keyboard');click(find(desc='收起键盘'));rotate(0)
+        record('codec options match theme; three navigation keys stay on window centerline with wrapping status in portrait, 320 dp width, landscape cutout, and keyboard layout')
+    else:
+        tap('省流');connect()
+    shell(a.target,'cmd','statusbar','collapse');shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
+    initial=target_text();click(find(desc='虚拟键盘'));click(find(desc='输入文字'))
+    click(find(desc='发送文本'));set_text('发送文本','cancelled text');tap('取消')
+    assert target_text()==initial
+    click(find(desc='输入文字'));click(find(desc='发送文本'));set_text('发送文本','界'*22000);tap('发送')
+    assert find(text='每次最多发送 64 KB 文本') is not None and target_text()==initial
+    value='统一样式测试🙂 dialog text'
+    set_text('发送文本',value);keyboard_buttons('取消','发送');screenshot('31-text-keyboard-portrait');tap('发送')
+    assert target_text()==initial+value
+    record('text dialog keeps cancel non-destructive, shows oversized-text error inline and sends Unicode through real clipboard protocol')
+    rotate(1);click(find(desc='输入文字'));click(find(desc='发送文本'));set_text('发送文本','landscape text')
+    keyboard_buttons('取消','发送');screenshot('31-text-keyboard-landscape');tap('取消');assert target_text()==initial+value
+    dock('after-text-cancel')
+    click(find(desc='输入文字'));set_text('发送文本','unfinished draft')
+    shell(a.client,'input','keyevent','KEYCODE_HOME')
+    end=time.monotonic()+10
+    while time.monotonic()<end:
+        activities=shell(a.client,'dumpsys','activity','activities')
+        resumed=next((line for line in activities.splitlines() if 'topResumedActivity=' in line),'')
+        server=re.search(r'(^|\s)com\.genymobile\.scrcpy\.Server(\s|$)',shell(a.target,'ps','-A','-o','ARGS'),re.M)
+        if 'launcher' in resumed.lower() and not server:break
+        time.sleep(.2)
+    else:raise AssertionError('Client did not finish background disconnection')
+    shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    assert find(text='输入文字') is None
+    rotate(0);bottom()
+    if not text_only:
+        top();tap('切换配置  ▾')
+        root=dump();chosen=next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n'))
+        click(chosen);tap('删除');tap('删除配置');tap('取消')
+    assert stored()[0]==before[0]
+    record('landscape text editor keeps footer above IME; cancel retains live session; backgrounding dismisses editor and cleanup preserves saved configs')
+
+
 try:
     adb(a.client, 'install', '-r', ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
     adb(a.target, 'install', '-r', ROOT / 'validation/probe/build/outputs/apk/debug/probe-debug.apk')
@@ -665,6 +761,9 @@ try:
         sys.exit(0)
     if find(text='展示虚拟按键').get('checked') == 'false':
         tap('展示虚拟按键')
+    if a.phase in ['dialogs','text-dialogs']:
+        verify_dialogs(a.phase=='text-dialogs')
+        sys.exit(0)
     if a.phase == 'appearance':
         verify_appearance()
         sys.exit(0)
@@ -841,7 +940,7 @@ except Exception:
     (a.output / 'client-log.txt').write_text(adb(a.client, 'logcat', '-d', '-s', 'ScrcpySession', 'ScrcpyServer'))
     raise
 finally:
-    if a.phase in ['ui','appearance']:
+    if a.phase in ['ui','appearance','dialogs','text-dialogs']:
         shell(a.client, 'wm', 'size', 'reset')
     for (serial,key), value in rotation_settings.items():
         try:
@@ -851,7 +950,7 @@ finally:
             print('Cleanup pending (device unavailable):', serial, key, e, flush=True)
     try:
         shell(a.target,'cmd','statusbar','collapse')
-        shell(a.client,'rm','-f','/data/local/tmp/scrcpy-validation.apk')
+        shell(a.client,'rm','-f','/data/local/tmp/scrcpy-validation.apk','/data/local/tmp/scrcpy-editor-input.txt')
         shell(a.target, 'am', 'force-stop', PROBE)
         adb(a.target, 'uninstall', PROBE)
     except (subprocess.SubprocessError, OSError) as e:
