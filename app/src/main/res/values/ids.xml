@@ -1,4 +1,10 @@
 <resources>
+    <item name="app_settings" type="id"/>
+    <item name="app_settings_done" type="id"/>
+    <item name="app_settings_scroll" type="id"/>
+    <item name="app_version" type="id"/>
+    <item name="repository_link" type="id"/>
+
     <item name="transport_picker" type="id"/>
     <item name="usb_device" type="id"/>
     <item name="rotate_left" type="id"/>

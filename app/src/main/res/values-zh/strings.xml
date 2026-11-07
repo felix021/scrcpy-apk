@@ -137,7 +137,6 @@
     <string name="landscape_connection_status">"横屏连接状态"</string>
     <string name="remote_rotation_service_stopped">"远端旋转服务已结束"</string>
     <string name="could_not_sync_remote_orientation">"同步远端方向失败"</string>
-    <string name="en">"中 / EN"</string>
     <string name="interface_language">"界面语言"</string>
     <string name="video_quality">"画质"</string>
     <string name="sync_remote_orientation">"同步远端屏幕方向"</string>
@@ -162,4 +161,12 @@
     <string name="saved_named">"已保存「%1$s」"</string>
     <string name="delete_named_title">"删除「%1$s」？"</string>
     <string name="app_name">"远控 · scrcpy"</string>
+    <string name="app_settings">设置</string>
+    <string name="app_settings_hint">语言与应用信息</string>
+    <string name="about">关于</string>
+    <string name="app_description">通过网络或 USB 控制另一台 Android 设备。</string>
+    <string name="app_version">版本 %1$s (%2$d)</string>
+    <string name="app_license">开源许可 · GPL-3.0</string>
+    <string name="code_repository">代码仓库</string>
+    <string name="no_browser_available">未找到浏览器，请在浏览器中打开代码仓库地址。</string>
 </resources>

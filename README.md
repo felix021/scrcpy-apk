@@ -1,6 +1,6 @@
 # scrcpy APK
 
-在 Android 上查看并控制另一台 Android 设备。支持选择网络 ADB 或 USB ADB：网络填写设备 IP / 主机名与端口，USB 通过主控手机的 Host/OTG 直接连接。无需电脑中转视频，也不需要额外开放投屏端口。USB 路径已实现，尚未完成真实手机之间的 OTG 验收。
+在 Android 上查看并控制另一台 Android 设备。支持选择网络 ADB 或 USB ADB：网络填写设备 IP / 主机名与端口，USB 通过主控手机的 Host/OTG 直接连接。无需电脑中转视频，也不需要额外开放投屏端口。USB ADB 功能已通过用户实机验收。
 
 - 紧凑配置界面、底部固定连接按钮、实时视频、单指和多指触控。
 - 网络 / USB 两种连接方式，可随完整配置保存。USB 模式自动列出带 ADB 接口的设备，点击列表可刷新；首次连接先申请本机 USB 访问权限，再由远端确认 ADB 调试授权。拔线结束会话，不自动切换网络连接。
@@ -16,7 +16,8 @@
 - 仅观看模式、充电时保持远端唤醒。切到后台或点击断开后结束连接。
 - 两个独立的声音开关：默认开启「播放远端声音」，默认关闭「转发本机麦克风」，可随主机配置保存。前者把远端系统声音传回本机；后者将本机麦克风作为远端应用的录音输入，仅在开启后申请本机录音权限。两者可同时使用。
 - 远控页齿轮弹窗可立即切换虚拟按键、完整键盘、两个声音开关、保持唤醒和方向同步，无需重新连接。运行时修改会记住，并更新当前已保存主机的对应开关。关闭声音会停止对应采集或录音，关闭保持唤醒会恢复远端原值。
-- 界面支持中文和英文，默认跟随系统，其他系统语言使用英文；配置页和远控设置均可手动切换，切换时保留正在填写的内容和远控连接。
+- 配置页右上角「设置」提供语言选择、关于、当前版本和代码仓库入口。
+- 界面支持中文和英文，默认跟随系统，其他系统语言使用英文；配置页右上角「设置」和远控设置均可手动切换，切换时保留正在填写的内容和远控连接。
 - 配置页标题与产品标识同排，底部连接按钮固定；还有内容时显示渐隐和滑动提示，滚到底部自动消失。
 - 使用固定版本的官方 scrcpy 5.0.1 server。
 
@@ -46,7 +47,7 @@ ADB 身份密钥保存在应用私有目录，正常重启和升级保留。应�
 
 如果列表为空，检查数据线是否支持数据传输、远端 USB 调试是否开启，以及 USB-C 的主从角色；主控手机应处于「由此设备控制 USB」或相应的 Host 模式。点击设备列表可重新扫描。可以保存 USB 配置的画质和控制选项，连接后记住可获得的设备标识。USB 和网络配置独立保存，旧配置默认继续使用网络。
 
-USB 授权、读写与拔插尚未在两台实际手机上验证。模拟器检查仅覆盖配置界面、协议模拟和网络回归；测试边界见 [0.11 验证记录](docs/VALIDATION-0.11.md)。
+USB ADB 功能已由用户在真实手机上验收通过；开发侧的模拟器检查覆盖配置界面、协议模拟和网络回归。测试记录与边界见 [0.11 验证记录](docs/VALIDATION-0.11.md)。
 
 参考：[Android USB Host](https://developer.android.com/develop/connectivity/usb/host)。
 
@@ -77,7 +78,7 @@ python3 scripts/verify-avd.py \
   --output /path/outside/repository
 ```
 
-脚本适配专用 1080×2340 AVD，覆盖配置保存与进程重启恢复、真实视频、触控、虚拟键、客户端旋转、H.265、仅观看、参数校验和后台断开。结果和截图写入 `--output`，不会进入 Git。设备中断后，可用 `--phase lifecycle` 单独补跑后台断开与触点释放、取消后重连、远端进程退出；请为每次运行使用独立输出目录。保存与文字输入弹窗、键盘遮挡、编码菜单和导航居中专项用 `--phase dialogs`，文字输入可用 `--phase text-dialogs` 单独检查，见 [0.6 验证记录](docs/VALIDATION-0.6.md)。新图标、配置弹窗的选择/取消/二次删除确认和图标断开按钮专项用 `--phase appearance`，见 [0.5 验证记录](docs/VALIDATION-0.5.md)。多主机保存、切换和顶部留白专项用 `--phase configs`，见 [0.4 验证记录](docs/VALIDATION-0.4.md)。配置页和手势专项可用 `--phase ui` 运行；三键布局、四边动作、完整键盘和横屏专项用 `--phase controls`，结果见 [0.3 验证记录](docs/VALIDATION-0.3.md)。首次全屏提示需要确认。使用 `scripts/start-avd.sh <avd-name> <console-port>` 可避免 AVD 继承宿主机代理环境变量。双向声音、四种开关组合及录音权限专项用 `--phase audio`，使用两种测试音分别测量远端真实录音和本机真实输出。自动旋转、断开及强制结束后的设置恢复专项用 `--phase rotation`。双行控制键、左右横屏侧栏及中置摄像头避让专项用 `--phase landscape`；完整键盘输入专项用 `--phase keyboard`，见 [0.7 验证记录](docs/VALIDATION-0.7.md)。运行时开关专项用 `--phase runtime`，同一视频连接内的四种声音组合用 `--phase audio-runtime`，中英文及滑动提示用 `--phase language`，见 [0.8 验证记录](docs/VALIDATION-0.8.md)。六行键盘、上下滑输入和横屏键盘专项同样使用 `--phase keyboard`，见 [0.9 验证记录](docs/VALIDATION-0.9.md)。Win 组合键、半透明弹窗和手动旋转专项使用 `--phase manual-rotation`，见 [0.10 验证记录](docs/VALIDATION-0.10.md)。USB 界面、配置切换和网络投屏回归使用 `--phase usb-ui`。USB 分包、零长度包、RSA 授权、逻辑通道和取消行为另有 JVM 测试；见 [0.11 验证记录](docs/VALIDATION-0.11.md)。ADB 收包、控制消息和关闭竞争另有 JVM 回归测试。
+脚本适配专用 1080×2340 AVD，覆盖配置保存与进程重启恢复、真实视频、触控、虚拟键、客户端旋转、H.265、仅观看、参数校验和后台断开。结果和截图写入 `--output`，不会进入 Git。设备中断后，可用 `--phase lifecycle` 单独补跑后台断开与触点释放、取消后重连、远端进程退出；请为每次运行使用独立输出目录。保存与文字输入弹窗、键盘遮挡、编码菜单和导航居中专项用 `--phase dialogs`，文字输入可用 `--phase text-dialogs` 单独检查，见 [0.6 验证记录](docs/VALIDATION-0.6.md)。新图标、配置弹窗的选择/取消/二次删除确认和图标断开按钮专项用 `--phase appearance`，见 [0.5 验证记录](docs/VALIDATION-0.5.md)。多主机保存、切换和顶部留白专项用 `--phase configs`，见 [0.4 验证记录](docs/VALIDATION-0.4.md)。配置页和手势专项可用 `--phase ui` 运行；三键布局、四边动作、完整键盘和横屏专项用 `--phase controls`，结果见 [0.3 验证记录](docs/VALIDATION-0.3.md)。首次全屏提示需要确认。使用 `scripts/start-avd.sh <avd-name> <console-port>` 可避免 AVD 继承宿主机代理环境变量。双向声音、四种开关组合及录音权限专项用 `--phase audio`，使用两种测试音分别测量远端真实录音和本机真实输出。自动旋转、断开及强制结束后的设置恢复专项用 `--phase rotation`。双行控制键、左右横屏侧栏及中置摄像头避让专项用 `--phase landscape`；完整键盘输入专项用 `--phase keyboard`，见 [0.7 验证记录](docs/VALIDATION-0.7.md)。运行时开关专项用 `--phase runtime`，同一视频连接内的四种声音组合用 `--phase audio-runtime`，中英文及滑动提示用 `--phase language`，见 [0.8 验证记录](docs/VALIDATION-0.8.md)。六行键盘、上下滑输入和横屏键盘专项同样使用 `--phase keyboard`，见 [0.9 验证记录](docs/VALIDATION-0.9.md)。Win 组合键、半透明弹窗和手动旋转专项使用 `--phase manual-rotation`，见 [0.10 验证记录](docs/VALIDATION-0.10.md)。USB 界面、配置切换和网络投屏回归使用 `--phase usb-ui`。应用设置、关于、语言切换、仓库入口和横屏弹窗专项使用 `--phase app-settings`，见 [0.12 验证记录](docs/VALIDATION-0.12.md)。USB 分包、零长度包、RSA 授权、逻辑通道和取消行为另有 JVM 测试；见 [0.11 验证记录](docs/VALIDATION-0.11.md)。ADB 收包、控制消息和关闭竞争另有 JVM 回归测试。
 
 ## 许可证
 

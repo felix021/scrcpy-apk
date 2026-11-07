@@ -20,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'usb-ui', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'usb-ui', 'app-settings', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -131,6 +131,12 @@ def top():
         shell(a.client,'input','swipe',(l+r)//2,t+40,(l+r)//2,b-40,350)
         time.sleep(.3)
     raise AssertionError('Form did not scroll to device fields')
+
+
+def form_language(option):
+    top();click(find(rid='app_settings'))
+    click(find(rid='language_picker'));click(find(desc=option))
+    click(find(rid='app_settings_done'))
 
 
 def edit(desc, value):
@@ -817,12 +823,12 @@ def verify_usb_ui():
     method('网络 ADB');assert find(desc='设备 IP / 主机名').get('text')==a.host
     assert find(desc='ADB 端口').get('text')==str(a.port)
     save(tcp_name);choose(usb_name);assert find(rid='transport_picker').get('text').startswith('USB')
-    click(find(rid='language_picker'));click(find(desc='English'))
+    form_language('English')
     assert find(rid='usb_device') is not None and find(desc='Device IP / hostname') is None
     shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
     assert find(rid='transport_picker').get('text').startswith('USB')
     assert find(text='Remote control') is not None
-    click(find(rid='language_picker'));click(find(desc='简体中文'));choose(tcp_name)
+    form_language('简体中文');choose(tcp_name)
     assert find(desc='设备 IP / 主机名').get('text')==a.host
     for name in [usb_name,tcp_name]:
         top();tap('切换配置  ▾');root=dump()
@@ -981,10 +987,68 @@ def verify_runtime():
         except (subprocess.SubprocessError,OSError) as e:print('Keep-awake cleanup pending:',e,flush=True)
 
 
+def verify_app_settings():
+    package=shell(a.client,'dumpsys','package',PKG)
+    version=re.search(r'versionName=(\S+)',package).group(1)
+    code=re.search(r'versionCode=(\d+)',package).group(1)
+    def open_settings():
+        top();click(find(rid='app_settings'))
+    def scroll_to(rid):
+        for _ in range(5):
+            root=dump();node=find(rid=rid,root=root)
+            if node is not None and bounds(node)[3]>bounds(node)[1]:return node
+            l,t,r,b=bounds(find(rid='app_settings_scroll',root=root))
+            shell(a.client,'input','swipe',(l+r)//2,b-25,(l+r)//2,t+25,250)
+        raise AssertionError('Settings item unreachable: '+rid)
+    top();root=dump()
+    assert find(rid='app_settings',root=root) is not None and find(rid='language_picker',root=root) is None
+    screenshot('80-settings-entry')
+    open_settings();root=dump()
+    assert find(text='关于',root=root) is not None
+    assert find(rid='app_version',root=root).get('text')==f'版本 {version} ({code})'
+    assert find(text='开源许可 · GPL-3.0',root=root) is not None
+    link=scroll_to('repository_link')
+    assert link.get('content-desc')=='代码仓库 · https://github.com/felix021/scrcpy-apk'
+    screenshot('81-app-settings-zh');click(find(rid='app_settings_done'))
+    edit('设备 IP / 主机名','draft-phone.example');edit('最长边 · px','1')
+    form_language('English')
+    assert find(desc='Device IP / hostname').get('text')=='draft-phone.example'
+    assert find(desc='Max edge · px').get('text')=='1'
+    open_settings();assert find(text='About') is not None
+    assert find(rid='app_version').get('text')==f'Version {version} ({code})'
+    screenshot('82-app-settings-en');click(find(rid='app_settings_done'))
+    shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    assert find(text='Remote control') is not None
+    record('settings replaces the header language shortcut; About shows the built version, license and repository; language preserves unsaved raw fields and survives restart')
+    top();click(find(rid='transport_picker'));click(find(desc='USB ADB'))
+    form_language('Follow system');assert find(text='Remote control') is not None
+    form_language('简体中文');assert find(rid='transport_picker').get('text').startswith('USB')
+    assert find(rid='usb_device') is not None and find(desc='设备 IP / 主机名') is None
+    record('language changes from settings preserve USB transport; follow-system and both manual languages work')
+    open_settings()
+    for orientation in [1,3]:
+        shell(a.client,'settings','put','system','user_rotation',orientation);time.sleep(.6)
+        root=dump();done=bounds(find(rid='app_settings_done',root=root))
+        dims=list(map(int,re.findall(r'\d+',shell(a.client,'wm','size'))))
+        assert done[2]>done[0] and done[3]>done[1] and done[2]<=max(dims) and done[3]<=min(dims)
+        link=scroll_to('repository_link');screenshot('83-app-settings-landscape-'+str(orientation))
+        assert bounds(link)[3]<=done[1], 'Repository overlaps fixed dialog footer'
+    shell(a.client,'settings','put','system','user_rotation',0);time.sleep(.6)
+    link=scroll_to('repository_link');click(link)
+    activities=shell(a.client,'dumpsys','activity','activities')
+    assert 'android.intent.action.VIEW' in activities and 'https://github.com/felix021/scrcpy-apk' in activities
+    shell(a.client,'am','start','-n',PKG+'/.MainActivity');time.sleep(.5)
+    click(find(rid='app_settings_done'));open_settings();shell(a.client,'input','keyevent','KEYCODE_BACK')
+    assert find(rid='app_settings_done') is None and find(rid='app_settings') is not None
+    record('settings stays usable in both landscape directions, keeps its close action visible, opens the exact repository URL in a browser and handles Back')
+    top();click(find(rid='transport_picker'));click(find(desc='网络 ADB'))
+    edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port))
+
+
 def verify_language():
     top()
     def language(option):
-        top();click(find(rid='language_picker'));click(find(desc=option))
+        form_language(option)
     language('跟随系统');root=dump()
     assert find(text='Remote control',root=root) is not None
     title=bounds(find(text='Remote control',root=root));brand=bounds(find(text='SCRCPY / ANDROID',root=root))
@@ -1032,7 +1096,7 @@ def verify_live_language():
     click(find(rid='disconnect_confirm'))
     assert find(text='Remote control') is not None
     record('live language switch translates settings, keyboard and confirmation without replacing the video session')
-    top();click(find(rid='language_picker'));click(find(desc='简体中文'))
+    form_language('简体中文')
 
 
 def verify_top_buffer():
@@ -1365,7 +1429,7 @@ try:
     shell(a.client, 'am', 'start', '-n', PKG + '/.MainActivity')
     time.sleep(.5)
     screenshot('01-form')
-    click(find(rid='language_picker'));tap('简体中文')
+    form_language('简体中文')
     if find(rid='transport_picker').get('text').startswith('USB'):
         click(find(rid='transport_picker'));tap('网络 ADB')
     edit('设备 IP / 主机名', a.host)
@@ -1376,6 +1440,9 @@ try:
     if a.phase!='audio':
         node=find(text='转发本机麦克风')
         if node is not None and node.get('checked')=='true':click(node)
+    if a.phase == 'app-settings':
+        verify_app_settings()
+        sys.exit(0)
     if a.phase == 'usb-ui':
         verify_usb_ui()
         sys.exit(0)

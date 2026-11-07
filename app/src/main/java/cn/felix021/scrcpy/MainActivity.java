@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
     };
     private boolean permissionForRuntimeMic;
     private int permissionGeneration;
-    private Dialog settingsDialog;
+    private Dialog settingsDialog, appSettingsDialog;
     private android.widget.PopupWindow choicePopup;
     private final java.util.Map<String,Switch> runtimeSwitches=new java.util.HashMap<>();
     private boolean updatingRuntime;
@@ -194,9 +194,9 @@ public final class MainActivity extends Activity {
         heading.addView(title,new LinearLayout.LayoutParams(-2,-2));
         TextView brand=label("SCRCPY / ANDROID",8,ACCENT);brand.setSingleLine(true);brand.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams brandParams=new LinearLayout.LayoutParams(0,-1,1);brandParams.setMarginStart(dp(8));heading.addView(brand,brandParams);
-        Button language=button(UiText.text(R.string.en),false);language.setId(R.id.language_picker);language.setTextSize(11);language.setPadding(dp(4),0,dp(4),0);
-        language.setContentDescription(UiText.text(R.string.interface_language));heading.addView(language,new LinearLayout.LayoutParams(dp(52),dp(32)));
-        language.setOnClickListener(v -> languagePicker(language));add(page,heading,34);gap(page,12);
+        ImageButton settings=iconButton(R.drawable.ic_settings,UiText.text(R.string.app_settings));settings.setId(R.id.app_settings);
+        settings.setPadding(dp(6),dp(6),dp(6),dp(6));heading.addView(settings,new LinearLayout.LayoutParams(dp(36),dp(32)));
+        settings.setOnClickListener(v -> showAppSettings());add(page,heading,34);gap(page,12);
         if (errorMessage != null) {
             TextView error = label(errorMessage, 13, 0xffffb6aa); error.setPadding(dp(12), dp(10), dp(12), dp(10));
             error.setBackground(background(0xff37272b, 12)); add(page, error, -2); gap(page, 10); errorMessage = null;
@@ -385,6 +385,39 @@ public final class MainActivity extends Activity {
         }
         popup.showAsDropDown(anchor,0,dp(5),Gravity.END);
     }
+    private void showAppSettings(){
+        if(mirroring || appSettingsDialog!=null)return;
+        LinearLayout body=configPanel(UiText.text(R.string.app_settings),UiText.text(R.string.app_settings_hint));
+        add(body,languageRow(),48);gap(body,20);
+        TextView about=label(UiText.text(R.string.about),13,MUTED);about.setTypeface(null,Typeface.BOLD);add(body,about,-2);gap(body,12);
+        LinearLayout identity=row();ImageView logo=new ImageView(this);logo.setImageResource(R.mipmap.ic_launcher);
+        logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);identity.addView(logo,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        LinearLayout name=column();TextView appName=label(UiText.text(R.string.app_name),17,TEXT);appName.setTypeface(null,Typeface.BOLD);
+        add(name,appName,-2);gap(name,4);add(name,label(UiText.text(R.string.app_description),12,MUTED),-2);
+        LinearLayout.LayoutParams nameParams=new LinearLayout.LayoutParams(0,-2,1);nameParams.setMarginStart(dp(12));identity.addView(name,nameParams);add(body,identity,-2);gap(body,16);
+        TextView version=label(UiText.format(R.string.app_version,BuildConfig.VERSION_NAME,BuildConfig.VERSION_CODE),13,TEXT);version.setId(R.id.app_version);
+        add(body,version,-2);gap(body,8);add(body,label(UiText.text(R.string.app_license),12,MUTED),-2);gap(body,18);
+        String repository="https://github.com/felix021/scrcpy-apk";
+        LinearLayout link=column();link.setId(R.id.repository_link);link.setPadding(dp(14),dp(12),dp(14),dp(12));link.setBackground(background(BG,14));
+        link.setContentDescription(UiText.text(R.string.code_repository)+" · "+repository);link.setFocusable(true);
+        add(link,label(UiText.text(R.string.code_repository)+"  ↗",14,ACCENT),-2);gap(link,4);
+        TextView address=label(repository,11,MUTED);address.setSingleLine(true);address.setEllipsize(android.text.TextUtils.TruncateAt.END);add(link,address,-2);add(body,link,-2);
+        link.setOnClickListener(v -> {
+            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(repository)));}
+            catch(android.content.ActivityNotFoundException e){toast(UiText.text(R.string.no_browser_available));}
+        });
+        LinearLayout actions=row();Button done=button(UiText.text(R.string.done),true);done.setId(R.id.app_settings_done);configAction(actions,done,1,true);
+        LinearLayout content=editorPanel(body,actions);ScrollView scroll=(ScrollView)content.getChildAt(0);
+        scroll.setId(R.id.app_settings_scroll);scroll.setScrollbarFadingEnabled(false);scroll.setVerticalFadingEdgeEnabled(true);scroll.setFadingEdgeLength(dp(16));
+        Dialog dialog=showConfigDialog(content,dp(440));appSettingsDialog=dialog;
+        dialog.setOnDismissListener(ignored -> {if(appSettingsDialog==dialog)appSettingsDialog=null;});done.setOnClickListener(v -> dialog.dismiss());
+    }
+    private LinearLayout languageRow(){
+        LinearLayout language=row();language.addView(label(UiText.text(R.string.interface_language),14,TEXT),new LinearLayout.LayoutParams(0,-2,1));
+        String[] options={"system","zh","en"};int selected=Math.max(0,java.util.Arrays.asList(options).indexOf(UiText.language()));
+        Button picker=button(languageNames()[selected]+"  ▾",false);picker.setId(R.id.language_picker);picker.setTextSize(12);
+        language.addView(picker,new LinearLayout.LayoutParams(-2,dp(40)));picker.setOnClickListener(v -> languagePicker(picker));return language;
+    }
     private String[] languageNames(){return new String[]{UiText.text(R.string.follow_system),UiText.text(R.string.language_label),"English"};}
     private void languagePicker(View anchor){
         String[] options={"system","zh","en"};int selected=java.util.Arrays.asList(options).indexOf(UiText.language());
@@ -394,6 +427,8 @@ public final class MainActivity extends Activity {
         });
     }
     private void refreshFormLanguage(){
+        boolean reopen=appSettingsDialog!=null && appSettingsDialog.isShowing();
+        Dialog previous=appSettingsDialog;appSettingsDialog=null;if(previous!=null)previous.dismiss();
         String method=connectionType;UsbDevice selection=selectedUsb;
         String[] values={host.getText().toString(),port.getText().toString(),size.getText().toString(),bitrate.getText().toString(),fps.getText().toString()};
         boolean[] flags={showNavigation.isChecked(),viewOnly.isChecked(),forwardAudio.isChecked(),forwardMic.isChecked(),syncRotation.isChecked(),stayAwake.isChecked()};
@@ -401,7 +436,7 @@ public final class MainActivity extends Activity {
         showForm();EditText[] fields={host,port,size,bitrate,fps};for(int i=0;i<fields.length;i++)fields[i].setText(values[i]);
         showNavigation.setChecked(flags[0]);viewOnly.setChecked(flags[1]);forwardAudio.setChecked(flags[2]);forwardMic.setChecked(flags[3]);syncRotation.setChecked(flags[4]);stayAwake.setChecked(flags[5]);codec.setSelection(encoding);
         connectionType=method;selectedUsb=selection;updateTransportUi();
-        formScroll.post(() -> formScroll.scrollTo(0,scrollY));updateQuality();
+        formScroll.post(() -> formScroll.scrollTo(0,scrollY));updateQuality();if(reopen)showAppSettings();
     }
     private void refreshMirrorLanguage(){
         surface.setContentDescription(UiText.text(R.string.remote_screen));remoteInput.setContentDescription(UiText.text(R.string.remote_touch_area));
@@ -434,10 +469,7 @@ public final class MainActivity extends Activity {
         runtimeSwitch(body,"syncRotation",UiText.text(R.string.sync_remote_orientation),!profile.viewOnly);
         add(body,label(UiText.text(R.string.turning_off_orientation_sync_or_keep_awake_restores_the_remote_d),11,MUTED),-2);gap(body,6);
         runtimeSwitch(body,"keyboard",UiText.text(R.string.show_virtual_keyboard),!profile.viewOnly);
-        LinearLayout language=row();language.addView(label(UiText.text(R.string.interface_language),14,TEXT),new LinearLayout.LayoutParams(0,-2,1));
-        String[] options={"system","zh","en"};int selected=Math.max(0,java.util.Arrays.asList(options).indexOf(UiText.language()));
-        Button picker=button(languageNames()[selected]+"  ▾",false);picker.setId(R.id.language_picker);picker.setTextSize(12);
-        language.addView(picker,new LinearLayout.LayoutParams(-2,dp(40)));picker.setOnClickListener(v -> languagePicker(picker));add(body,language,48);gap(body,8);
+        add(body,languageRow(),48);gap(body,8);
         add(body,label(profile.viewOnly?UiText.text(R.string.view_only_mode_does_not_send_keys_microphone_input_or_orientatio):UiText.text(R.string.disconnect_to_change_the_address_video_quality_or_view_only_mode),11,MUTED),-2);
         LinearLayout actions=row();Button disconnect=button(UiText.text(R.string.disconnect),false),done=button(UiText.text(R.string.done),true);
         disconnect.setTextColor(0xffffb6aa);disconnect.setBackground(background(0xff352a31,14));
@@ -1087,7 +1119,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();resumed=true;completeUsbPermission();if(!mirroring && usbPicker!=null)updateTransportUi();}
     @Override protected void onPause(){resumed=false;super.onPause();}
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);usbAttachedIntent(intent);}
-    @Override protected void onDestroy() { cancelUsbPermission();unregisterReceiver(usbEvents);if (session != null) session.close(); super.onDestroy(); }
+    @Override protected void onDestroy() { if(appSettingsDialog!=null)appSettingsDialog.dismiss();if(choicePopup!=null)choicePopup.dismiss();cancelUsbPermission();unregisterReceiver(usbEvents);if (session != null) session.close(); super.onDestroy(); }
     @Override public void onBackPressed() {
         if (mirroring) {
             android.util.Log.d("RemoteGesture", "LOCAL_BACK_FORWARD");
