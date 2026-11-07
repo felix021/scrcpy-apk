@@ -20,10 +20,17 @@ public final class CaptureOutput {
         int volume=manager.getStreamVolume(AudioManager.STREAM_MUSIC);
         try {
             record.startRecording();manager.setStreamVolume(AudioManager.STREAM_MUSIC,manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),0);System.out.println("CAPTURE_READY");System.out.flush();
-            short[] samples=new short[9600];double maximum=0;
+            short[] samples=new short[9600];double maximum=0;boolean normalized=false;
             long end=android.os.SystemClock.uptimeMillis()+4000;
             while(android.os.SystemClock.uptimeMillis()<end) {
                 int n=record.read(samples,0,samples.length);if(n<=0)throw new IllegalStateException("Audio read "+n);
+                if(!normalized){
+                    // REMOTE_SUBMIX changes the active output route asynchronously.
+                    // Normalize its gain after the first captured buffer, not before routing.
+                    int max=manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    manager.setStreamVolume(AudioManager.STREAM_MUSIC,max-1,0);manager.setStreamVolume(AudioManager.STREAM_MUSIC,max,0);
+                    normalized=true;continue;
+                }
                 double re=0,im=0;int frames=n/2;
                 for(int i=0;i<frames;i++) {
                     double value=(samples[i*2]+samples[i*2+1])/2.0;

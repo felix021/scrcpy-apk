@@ -1,8 +1,9 @@
 # scrcpy APK
 
-在 Android 上查看并控制另一台 Android 设备。通过设备 IP 或主机名连接 ADB TCP，无需电脑中转视频，也不需要额外开放投屏端口。
+在 Android 上查看并控制另一台 Android 设备。支持选择网络 ADB 或 USB ADB：网络填写设备 IP / 主机名与端口，USB 通过主控手机的 Host/OTG 直接连接。无需电脑中转视频，也不需要额外开放投屏端口。USB 路径已实现，尚未完成真实手机之间的 OTG 验收。
 
 - 紧凑配置界面、底部固定连接按钮、实时视频、单指和多指触控。
+- 网络 / USB 两种连接方式，可随完整配置保存。USB 模式自动列出带 ADB 接口的设备，点击列表可刷新；首次连接先申请本机 USB 访问权限，再由远端确认 ADB 调试授权。拔线结束会话，不自动切换网络连接。
 - 远控页隐藏本机系统栏，顶部留出完整状态栏高度的空白，竖屏底部同一行放置连接状态、返回 / Home / 最近任务三键，以及键盘和设置图标按钮，并避开系统安全区。横屏时状态移到左侧，按钮在右侧竖排，避开圆角与摄像头，取消底部工具栏占用。连接状态允许换行并自动缩小，三键独立对齐屏幕中线。齿轮按钮打开远控设置；手动断开需确认，取消后继续远控。
 - 从远控画面四边向内滑动：左右边返回、底边回桌面、顶边打开控制中心。也可从画面旁的黑边滑入；不依赖远端使用手势导航还是三键导航。物理屏幕的系统保留区域仍由本机处理。
 - 「展示虚拟按键」默认勾选，取消后可通过边缘手势操作；完整键盘仍可单独展开。
@@ -39,7 +40,15 @@
 
 ADB 身份密钥保存在应用私有目录，正常重启和升级保留。应用不备份密钥。卸载或清除数据后，需要重新授权。
 
-目前连接方式为 IP / 主机名对应的 ADB TCP。USB Host / OTG 直连尚未实现。
+### USB 直连
+
+主控手机需支持 USB Host / OTG；如系统有 OTG 开关，请先开启。被控手机开启开发者选项中的 USB 调试，两台手机通过数据线连接。在主控手机选择「USB ADB」及设备，点击连接，在本机允许访问 USB，在被控手机允许调试授权。无需开启 ADB TCP、填写 IP 或开放端口。
+
+如果列表为空，检查数据线是否支持数据传输、远端 USB 调试是否开启，以及 USB-C 的主从角色；主控手机应处于「由此设备控制 USB」或相应的 Host 模式。点击设备列表可重新扫描。可以保存 USB 配置的画质和控制选项，连接后记住可获得的设备标识。USB 和网络配置独立保存，旧配置默认继续使用网络。
+
+USB 授权、读写与拔插尚未在两台实际手机上验证。模拟器检查仅覆盖配置界面、协议模拟和网络回归；测试边界见 [0.11 验证记录](docs/VALIDATION-0.11.md)。
+
+参考：[Android USB Host](https://developer.android.com/develop/connectivity/usb/host)。
 
 ## 可选：跨网络连接
 
@@ -68,7 +77,7 @@ python3 scripts/verify-avd.py \
   --output /path/outside/repository
 ```
 
-脚本适配专用 1080×2340 AVD，覆盖配置保存与进程重启恢复、真实视频、触控、虚拟键、客户端旋转、H.265、仅观看、参数校验和后台断开。结果和截图写入 `--output`，不会进入 Git。设备中断后，可用 `--phase lifecycle` 单独补跑后台断开与触点释放、取消后重连、远端进程退出；请为每次运行使用独立输出目录。保存与文字输入弹窗、键盘遮挡、编码菜单和导航居中专项用 `--phase dialogs`，文字输入可用 `--phase text-dialogs` 单独检查，见 [0.6 验证记录](docs/VALIDATION-0.6.md)。新图标、配置弹窗的选择/取消/二次删除确认和图标断开按钮专项用 `--phase appearance`，见 [0.5 验证记录](docs/VALIDATION-0.5.md)。多主机保存、切换和顶部留白专项用 `--phase configs`，见 [0.4 验证记录](docs/VALIDATION-0.4.md)。配置页和手势专项可用 `--phase ui` 运行；三键布局、四边动作、完整键盘和横屏专项用 `--phase controls`，结果见 [0.3 验证记录](docs/VALIDATION-0.3.md)。首次全屏提示需要确认。使用 `scripts/start-avd.sh <avd-name> <console-port>` 可避免 AVD 继承宿主机代理环境变量。双向声音、四种开关组合及录音权限专项用 `--phase audio`，使用两种测试音分别测量远端真实录音和本机真实输出。自动旋转、断开及强制结束后的设置恢复专项用 `--phase rotation`。双行控制键、左右横屏侧栏及中置摄像头避让专项用 `--phase landscape`；完整键盘输入专项用 `--phase keyboard`，见 [0.7 验证记录](docs/VALIDATION-0.7.md)。运行时开关专项用 `--phase runtime`，同一视频连接内的四种声音组合用 `--phase audio-runtime`，中英文及滑动提示用 `--phase language`，见 [0.8 验证记录](docs/VALIDATION-0.8.md)。六行键盘、上下滑输入和横屏键盘专项同样使用 `--phase keyboard`，见 [0.9 验证记录](docs/VALIDATION-0.9.md)。Win 组合键、半透明弹窗和手动旋转专项使用 `--phase manual-rotation`，见 [0.10 验证记录](docs/VALIDATION-0.10.md)。ADB 收包、控制消息和关闭竞争另有 JVM 回归测试。
+脚本适配专用 1080×2340 AVD，覆盖配置保存与进程重启恢复、真实视频、触控、虚拟键、客户端旋转、H.265、仅观看、参数校验和后台断开。结果和截图写入 `--output`，不会进入 Git。设备中断后，可用 `--phase lifecycle` 单独补跑后台断开与触点释放、取消后重连、远端进程退出；请为每次运行使用独立输出目录。保存与文字输入弹窗、键盘遮挡、编码菜单和导航居中专项用 `--phase dialogs`，文字输入可用 `--phase text-dialogs` 单独检查，见 [0.6 验证记录](docs/VALIDATION-0.6.md)。新图标、配置弹窗的选择/取消/二次删除确认和图标断开按钮专项用 `--phase appearance`，见 [0.5 验证记录](docs/VALIDATION-0.5.md)。多主机保存、切换和顶部留白专项用 `--phase configs`，见 [0.4 验证记录](docs/VALIDATION-0.4.md)。配置页和手势专项可用 `--phase ui` 运行；三键布局、四边动作、完整键盘和横屏专项用 `--phase controls`，结果见 [0.3 验证记录](docs/VALIDATION-0.3.md)。首次全屏提示需要确认。使用 `scripts/start-avd.sh <avd-name> <console-port>` 可避免 AVD 继承宿主机代理环境变量。双向声音、四种开关组合及录音权限专项用 `--phase audio`，使用两种测试音分别测量远端真实录音和本机真实输出。自动旋转、断开及强制结束后的设置恢复专项用 `--phase rotation`。双行控制键、左右横屏侧栏及中置摄像头避让专项用 `--phase landscape`；完整键盘输入专项用 `--phase keyboard`，见 [0.7 验证记录](docs/VALIDATION-0.7.md)。运行时开关专项用 `--phase runtime`，同一视频连接内的四种声音组合用 `--phase audio-runtime`，中英文及滑动提示用 `--phase language`，见 [0.8 验证记录](docs/VALIDATION-0.8.md)。六行键盘、上下滑输入和横屏键盘专项同样使用 `--phase keyboard`，见 [0.9 验证记录](docs/VALIDATION-0.9.md)。Win 组合键、半透明弹窗和手动旋转专项使用 `--phase manual-rotation`，见 [0.10 验证记录](docs/VALIDATION-0.10.md)。USB 界面、配置切换和网络投屏回归使用 `--phase usb-ui`。USB 分包、零长度包、RSA 授权、逻辑通道和取消行为另有 JVM 测试；见 [0.11 验证记录](docs/VALIDATION-0.11.md)。ADB 收包、控制消息和关闭竞争另有 JVM 回归测试。
 
 ## 许可证
 

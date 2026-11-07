@@ -1,4 +1,6 @@
 <resources>
+    <item name="transport_picker" type="id"/>
+    <item name="usb_device" type="id"/>
     <item name="rotate_left" type="id"/>
     <item name="rotate_right" type="id"/>
     <item name="language_picker" type="id"/>

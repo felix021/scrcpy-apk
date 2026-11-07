@@ -48,7 +48,8 @@ final class ScrcpySession {
     private final ArrayBlockingQueue<byte[]> controls = new ArrayBlockingQueue<>(256);
     private volatile Thread controlWriter;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
-    private volatile Socket socket;
+    private volatile java.io.Closeable transport;
+    private final android.hardware.usb.UsbDevice usbDevice;
     private volatile AdbConnection adb;
     private volatile AdbStream control;
     private volatile Thread worker;
@@ -64,13 +65,14 @@ final class ScrcpySession {
     private boolean micUploaded;
     private String serverPath,micPath,micName;
 
-    ScrcpySession(Context context, Profile profile, Surface surface, Listener listener) {
+    ScrcpySession(Context context, Profile profile, android.hardware.usb.UsbDevice usbDevice, Surface surface, Listener listener) {
         this.context = context.getApplicationContext(); this.profile = profile.copy();
         this.surface = surface; this.listener = listener;
+        this.usbDevice=usbDevice;
     }
 
     void start() {
-        startupTimeout = timer.schedule(() -> fail(UiText.text(R.string.connection_timed_out_check_the_network_and_allow_usb_debugging_o)), 60, TimeUnit.SECONDS);
+        startupTimeout = timer.schedule(() -> fail(UiText.text(profile.isUsb()?R.string.usb_connection_timeout:R.string.connection_timed_out_check_the_network_and_allow_usb_debugging_o)), 60, TimeUnit.SECONDS);
         worker = new Thread(this::run, "scrcpy-video"); worker.start();
     }
 
@@ -90,10 +92,16 @@ final class ScrcpySession {
             listener.status(UiText.text(R.string.connecting_to_adb_allow_debugging_on_the_remote_device));
             AdbCrypto crypto = identity(context);
             checkOpen();
-            Socket s = new Socket(); socket = s;
-            checkOpen();
-            s.connect(new InetSocketAddress(profile.host, profile.port), 10000);
-            AdbConnection connection = AdbConnection.create(s, crypto); adb = connection;
+            AdbConnection connection;
+            if(profile.isUsb()){
+                UsbAdbStreams usb=UsbAdb.open(context,usbDevice);installTransport(usb);
+                connection=AdbConnection.create(usb.input,usb.output,usb,crypto);
+            }else{
+                Socket s = new Socket();installTransport(s);
+                s.connect(new InetSocketAddress(profile.host, profile.port), 10000);
+                connection=AdbConnection.create(s,crypto);
+            }
+            adb = connection;
             checkOpen();
             if (!connection.connect(45, TimeUnit.SECONDS, false)) throw new IOException(UiText.text(R.string.adb_authorization_timed_out_allow_debugging_on_the_remote_device));
             checkOpen();
@@ -321,6 +329,10 @@ final class ScrcpySession {
     }
 
     private void checkOpen() throws IOException { if (closed.get() || gracefulClosing.get()) throw new IOException(UiText.text(R.string.connection_cancelled)); }
+    private void installTransport(java.io.Closeable value)throws IOException{
+        transport=value;
+        if(closed.get() || gracefulClosing.get()){value.close();checkOpen();}
+    }
     private void fail(String message) { if (close()) listener.error(message); }
 
     void closeGracefully() {
@@ -350,7 +362,7 @@ final class ScrcpySession {
         Thread writer = controlWriter; if (writer != null) writer.interrupt();
         // Closing the transport unblocks all ADB readers/writers; codec teardown
         // belongs to the video worker, after its output thread has stopped.
-        Socket s = socket;
+        java.io.Closeable s = transport;
         if (s != null) try { s.close(); } catch (IOException ignored) { }
         Thread t = worker; if (t != null && t != Thread.currentThread()) t.interrupt();
         AdbConnection a = adb;

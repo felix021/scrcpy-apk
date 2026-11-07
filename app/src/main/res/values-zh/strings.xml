@@ -1,4 +1,17 @@
 <resources>
+    <string name="connection_method">连接方式</string>
+    <string name="network_adb">网络 ADB</string>
+    <string name="usb_adb">USB ADB</string>
+    <string name="choose_usb_device">选择 USB 设备</string>
+    <string name="usb_instructions">通过数据线连接，本机需处于 Host/OTG 模式，远端开启 USB 调试。点击设备列表可刷新；连接时在本机允许 USB 访问，并在远端允许调试。</string>
+    <string name="usb_host_unavailable">本机未报告 USB Host 支持，请使用支持 Host/OTG 的手机与数据线。</string>
+    <string name="usb_no_devices">未发现 USB ADB 设备，请检查数据线、本机 Host/OTG 模式和远端 USB 调试，再点击设备列表刷新。</string>
+    <string name="usb_not_connected">请先选择已连接的 USB 设备。</string>
+    <string name="usb_permission_denied">未获得 USB 访问权限，请重新连接并允许授权。</string>
+    <string name="usb_open_failed">无法打开 USB ADB 接口，请重新插线，并检查是否被其他应用占用。</string>
+    <string name="usb_disconnected">USB 已断开，重新插线后可再次连接。</string>
+    <string name="usb_transfer_failed">USB 传输失败，请检查数据线并重新连接。</string>
+    <string name="usb_connection_timeout">USB 连接超时，请检查 Host/OTG 模式、数据线和远端调试授权。</string>
     <string name="rotate_left">向左旋转</string>
     <string name="rotate_right">向右旋转</string>
     <string name="manual_rotation_hint">每次旋转远端 90°；本机不动时保持该方向。开启方向同步后，再转动本机会重新跟随。</string>

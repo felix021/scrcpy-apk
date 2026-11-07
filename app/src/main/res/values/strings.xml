@@ -1,4 +1,17 @@
 <resources>
+    <string name="connection_method">Connection</string>
+    <string name="network_adb">Network ADB</string>
+    <string name="usb_adb">USB ADB</string>
+    <string name="choose_usb_device">Select USB device</string>
+    <string name="usb_instructions">Connect a data cable with this phone in Host/OTG mode. Enable USB debugging on the remote phone. Tap the device list to refresh; allow USB access here and debugging on the remote phone.</string>
+    <string name="usb_host_unavailable">This device does not report USB Host support. Use a phone with Host/OTG and a data cable.</string>
+    <string name="usb_no_devices">No USB ADB device found. Check the data cable, Host/OTG mode and remote USB debugging, then tap the device list to refresh.</string>
+    <string name="usb_not_connected">Select a connected USB device first.</string>
+    <string name="usb_permission_denied">USB access was not granted. Connect again to request permission.</string>
+    <string name="usb_open_failed">Cannot open the USB ADB interface. Reconnect the cable and check whether another app is using it.</string>
+    <string name="usb_disconnected">USB disconnected. Reconnect the cable to connect again.</string>
+    <string name="usb_transfer_failed">USB transfer failed. Check the data cable and reconnect.</string>
+    <string name="usb_connection_timeout">USB connection timed out. Check Host/OTG mode, the data cable and the remote debugging authorization.</string>
     <string name="rotate_left">Rotate left</string>
     <string name="rotate_right">Rotate right</string>
     <string name="manual_rotation_hint">"Rotate the remote screen by 90°. It stays this way until you rotate again or turn this phone with orientation sync on."</string>

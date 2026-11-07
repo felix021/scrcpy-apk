@@ -21,7 +21,7 @@ public class AdbConnection implements Closeable {
      * The underlying socket that this class uses to
      * communicate with the target device.
      */
-    private Socket socket;
+    private Closeable transport;
 
     /**
      * The last allocated local stream ID. The ID
@@ -106,17 +106,17 @@ public class AdbConnection implements Closeable {
      * @throws IOException If there is a socket error
      */
     public static AdbConnection create(Socket socket, AdbCrypto crypto) throws IOException {
-        AdbConnection newConn = new AdbConnection();
-
-        newConn.crypto = crypto;
-
-        newConn.socket = socket;
-        newConn.inputStream = socket.getInputStream();
-        newConn.outputStream = socket.getOutputStream();
-
-        /* Disable Nagle because we're sending tiny packets */
         socket.setTcpNoDelay(true);
+        return create(socket.getInputStream(), socket.getOutputStream(), socket, crypto);
+    }
 
+    /** Creates a connection over an owned byte transport, such as Android USB Host. */
+    public static AdbConnection create(InputStream input, OutputStream output, Closeable transport, AdbCrypto crypto) {
+        AdbConnection newConn = new AdbConnection();
+        newConn.crypto = crypto;
+        newConn.transport = transport;
+        newConn.inputStream = input;
+        newConn.outputStream = output;
         return newConn;
     }
 
@@ -398,12 +398,12 @@ public class AdbConnection implements Closeable {
             return;
 
         /* Closing the socket will kick the connection thread */
-        socket.close();
+        transport.close();
 
         /* Wait for the connection thread to die */
         connectionThread.interrupt();
         try {
-            connectionThread.join();
+            if (connectionThread != Thread.currentThread()) connectionThread.join();
         } catch (InterruptedException e) {
         }
     }

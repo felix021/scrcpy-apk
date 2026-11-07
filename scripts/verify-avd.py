@@ -20,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'usb-ui', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -710,6 +710,11 @@ def verify_audio(live=False):
             previous_mic=mic
             shell(a.target,'am','force-stop',PROBE)
             shell(a.target,'am','start','-W','-n',PROBE+'/.AudioActivity','--es','mode','both','--ei','frequency',1499)
+            # Capture may have selected a new output device since the earlier
+            # volume setup. Force a gain update after the playback route is active.
+            for serial in media_volumes:
+                shell(serial,'cmd','media_session','volume','--stream',3,'--set',14)
+                shell(serial,'cmd','media_session','volume','--stream',3,'--set',15)
             output=shell(a.client,'CLASSPATH='+capture_apk+' app_process / '+PROBE+'.CaptureOutput')
             (a.output/('audio-'+str(int(playback))+str(int(mic))+'.txt')).write_text(output+'\n'+audio_logs())
             match=re.search(r'PLAYBACK_TONE1499=(\d+)',output);assert match,output
@@ -785,6 +790,54 @@ def core_pid():
     found=[line.split()[0] for line in lines if re.match(r'\s*\d+\s+(?:\S*/)?app_process(?:32|64)? / com\.genymobile\.scrcpy\.Server ',line) and 'video=true' in line]
     assert len(found)==1,found
     return found[0]
+
+
+
+def verify_usb_ui():
+    def method(label):
+        top();click(find(rid='transport_picker'));tap(label)
+    def save(name):
+        top();tap('保存配置');edit('配置名称',name);tap('保存')
+    def choose(name):
+        top();tap('切换配置  ▾');root=dump()
+        click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n')));tap('使用配置')
+    def saved():
+        raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
+        return {n.get('name'):n.text for n in ET.fromstring(raw)}
+    usb_name=test_name+'-usb';tcp_name=test_name+'-tcp'
+    top();assert find(desc='设备 IP / 主机名').get('text')==a.host
+    method('USB ADB');root=top()
+    assert find(rid='usb_device',root=root) is not None and find(desc='设备 IP / 主机名',root=root) is None and find(desc='ADB 端口',root=root) is None
+    click(find(rid='usb_device'));bottom();tap('连接设备   →')
+    assert find(text='连接设备   →') is not None and find(rid='runtime_settings') is None
+    record('USB selector hides network address and port; no attached device leaves the form available without starting a TCP connection')
+    save(usb_name);usb=next(p for p in json.loads(saved()['profiles']) if p['name']==usb_name)
+    assert usb['transport']=='usb' and usb['usbVendor']==usb['usbProduct']==-1
+    screenshot('70-usb-configuration')
+    method('网络 ADB');assert find(desc='设备 IP / 主机名').get('text')==a.host
+    assert find(desc='ADB 端口').get('text')==str(a.port)
+    save(tcp_name);choose(usb_name);assert find(rid='transport_picker').get('text').startswith('USB')
+    click(find(rid='language_picker'));click(find(desc='English'))
+    assert find(rid='usb_device') is not None and find(desc='Device IP / hostname') is None
+    shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    assert find(rid='transport_picker').get('text').startswith('USB')
+    assert find(text='Remote control') is not None
+    click(find(rid='language_picker'));click(find(desc='简体中文'));choose(tcp_name)
+    assert find(desc='设备 IP / 主机名').get('text')==a.host
+    for name in [usb_name,tcp_name]:
+        top();tap('切换配置  ▾');root=dump()
+        click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n')))
+        tap('删除');tap('删除配置');tap('取消')
+    record('USB and network profiles persist separately; switching, language changes and process restart retain connection method and network parameters')
+    bottom()
+    for name in ['播放远端声音','转发本机麦克风']:
+        node=find(text=name)
+        if node.get('checked')=='true':click(node)
+    connect();start_probe();adb(a.target,'logcat','-c')
+    root=wait_connected();l,t,r,b=bounds(find(desc='远控屏幕',root=root))
+    shell(a.client,'input','tap',(l+r)//2,(t+b)//2);assert_log('TOUCH 1')
+    screenshot('71-network-regression');tap('断开')
+    record('generalized ADB transport still renders live TCP video and delivers remote touch after switching from USB settings')
 
 
 def verify_manual_rotation(controls_only=False):
@@ -1056,6 +1109,7 @@ def verify_configs():
         roots=[top(),bottom()]
         nodes=[n for root in roots for n in root.iter('node')]
         for desc,key in [('设备 IP / 主机名','host'),('ADB 端口','port'),('最长边 · px','maxSize'),('码率 · Mbps','bitrate'),('帧率上限 · FPS','fps')]:
+            if profile.get('transport','tcp')=='usb' and key in ['host','port']:continue
             node=next((n for n in nodes if n.get('content-desc')==desc),None)
             assert node is not None and node.get('text')==str(profile[key]), (desc,node.attrib if node is not None else None)
         assert any(n.get('text')==('H.265' if profile['codec']=='h265' else 'H.264') for n in nodes)
@@ -1073,13 +1127,16 @@ def verify_configs():
     if old:
         choose(old[0]['name']);expect(old[0])
         record('existing saved connection restores after upgrading from previous APK')
+    top()
+    if find(rid='transport_picker').get('text').startswith('USB'):
+        click(find(rid='transport_picker'));tap('网络 ADB')
     top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));tap('省流')
     edit('最长边 · px','1280');switches(True,False,True);save(name_a)
-    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True,forwardAudio=True,forwardMic=False,syncRotation=True)
+    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True,forwardAudio=True,forwardMic=False,syncRotation=True,transport='tcp',usbVendor=-1,usbProduct=-1,usbSerial='',usbLabel='')
     top();edit('设备 IP / 主机名','second-device.example');edit('ADB 端口','5566');tap('高清')
     edit('最长边 · px','1920');edit('帧率上限 · FPS','45');click(find(desc='视频编码'));tap('H.265')
     switches(False,True,False,audio=False,mic=True,rotation=False);save(name_b,'second-device.example:5566')
-    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False,forwardAudio=False,forwardMic=True,syncRotation=False)
+    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False,forwardAudio=False,forwardMic=True,syncRotation=False,transport='tcp',usbVendor=-1,usbProduct=-1,usbSerial='',usbLabel='')
     root=picker()
     assert find(desc=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
     assert find(desc=name_b+'\nsecond-device.example:5566',root=root) is not None
@@ -1309,6 +1366,8 @@ try:
     time.sleep(.5)
     screenshot('01-form')
     click(find(rid='language_picker'));tap('简体中文')
+    if find(rid='transport_picker').get('text').startswith('USB'):
+        click(find(rid='transport_picker'));tap('网络 ADB')
     edit('设备 IP / 主机名', a.host)
     edit('ADB 端口', str(a.port))
     bottom()
@@ -1317,6 +1376,9 @@ try:
     if a.phase!='audio':
         node=find(text='转发本机麦克风')
         if node is not None and node.get('checked')=='true':click(node)
+    if a.phase == 'usb-ui':
+        verify_usb_ui()
+        sys.exit(0)
     if a.phase in ['manual-rotation','manual-rotation-controls']:
         verify_manual_rotation(a.phase=='manual-rotation-controls')
         sys.exit(0)

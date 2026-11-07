@@ -3,6 +3,14 @@ package cn.felix021.scrcpy;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.SharedPreferences;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
+import android.app.PendingIntent;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
+import android.net.Uri;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Rect;
@@ -51,6 +59,19 @@ public final class MainActivity extends Activity {
     private Spinner codec;
     private Switch viewOnly, stayAwake, showNavigation, forwardAudio, forwardMic, syncRotation;
     private Profile permissionProfile;
+    private UsbManager usbManager;
+    private UsbDevice selectedUsb,activeUsb;
+    private String connectionType="tcp";
+    private LinearLayout networkAddress,usbAddress;
+    private TextView networkHint,usbHint;
+    private Button transportPicker,usbPicker;
+    private Profile pendingUsbProfile;
+    private PendingIntent usbPermission;
+    private Uri usbPermissionUri;
+    private boolean resumed,usbGranted;
+    private final BroadcastReceiver usbEvents=new BroadcastReceiver(){
+        @Override public void onReceive(Context context,Intent intent){handleUsbEvent(intent);}
+    };
     private boolean permissionForRuntimeMic;
     private int permissionGeneration;
     private Dialog settingsDialog;
@@ -85,11 +106,19 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         prefs = getSharedPreferences("connections", MODE_PRIVATE);
         UiText.init(this,prefs.getString("language","system"));
+        usbManager=(UsbManager)getSystemService(USB_SERVICE);
+        IntentFilter usbFilter=new IntentFilter(getPackageName()+".USB_PERMISSION");
+        usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+        // RECEIVER_NOT_EXPORTED is API 33's flag; the overload itself is available on API 26.
+        registerUsbReceiver(usbFilter);
         getWindow().getDecorView().setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         showForm();
+        usbAttachedIntent(getIntent());
     }
 
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+    @android.annotation.SuppressLint("WrongConstant")
+    private void registerUsbReceiver(IntentFilter filter){registerReceiver(usbEvents,filter,Build.VERSION.SDK_INT>=33?4:0);}
     private GradientDrawable background(int color, int radius) {
         GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d;
     }
@@ -135,6 +164,7 @@ public final class MainActivity extends Activity {
         catch (Exception e) { return new Profile(); }
     }
     private void showForm() {
+        cancelUsbPermission();selectedUsb=null;
         mirroring = false; generation++;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (Build.VERSION.SDK_INT >= 28) {
@@ -179,12 +209,23 @@ public final class MainActivity extends Activity {
         equal(configs, load, false); equal(configs, save, true);
         load.setHeight(dp(40)); save.setHeight(dp(40)); add(device, configs, -2); gap(device, 10);
         save.setOnClickListener(v -> saveProfile()); load.setOnClickListener(v -> loadProfiles());
+        connectionType=profile.transport;
+        LinearLayout transportRow=row();transportRow.addView(label(UiText.text(R.string.connection_method),12,MUTED),new LinearLayout.LayoutParams(0,-2,1));
+        transportPicker=button("",false);transportPicker.setId(R.id.transport_picker);transportPicker.setTextSize(12);
+        transportRow.addView(transportPicker,new LinearLayout.LayoutParams(-2,dp(36)));add(device,transportRow,36);gap(device,8);
+        transportPicker.setOnClickListener(v -> choiceMenu(transportPicker,new String[]{UiText.text(R.string.network_adb),UiText.text(R.string.usb_adb)},connectionType.equals("usb")?1:0,index -> {
+            cancelUsbPermission();connectionType=index==1?"usb":"tcp";updateTransportUi();
+        }));
         LinearLayout address = row(); LinearLayout hostGroup = column(), portGroup = column();
+        networkAddress=address;
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(0, -2, 1); hp.setMarginEnd(dp(10));
         address.addView(hostGroup, hp); address.addView(portGroup, new LinearLayout.LayoutParams(dp(80), -2));
         host = field(hostGroup, UiText.text(R.string.device_ip_hostname), profile.host, false); host.setHint(UiText.text(R.string.enter_device_address)); host.setHintTextColor(MUTED);
         port = field(portGroup, UiText.text(R.string.adb_port), "" + profile.port, true); add(device, address, -2);
-        gap(device, 8); add(device, label(UiText.text(R.string.allow_usb_debugging_on_the_remote_device_when_connecting_for_the), 11, MUTED), -2); gap(page, 10);
+        gap(device, 8);networkHint=label(UiText.text(R.string.allow_usb_debugging_on_the_remote_device_when_connecting_for_the),11,MUTED);add(device,networkHint,-2);
+        usbAddress=column();usbPicker=button("",false);usbPicker.setId(R.id.usb_device);usbPicker.setTextSize(14);usbPicker.setSingleLine(true);usbPicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        add(usbAddress,usbPicker,44);gap(usbAddress,8);usbHint=label("",11,MUTED);add(usbAddress,usbHint,-2);add(device,usbAddress,-2);
+        usbPicker.setOnClickListener(v -> chooseUsbDevice());updateTransportUi();gap(page, 10);
         LinearLayout parameters = card(page);
         LinearLayout parameterHeading=row();
         TextView paramsTitle=label(UiText.text(R.string.video_controls),15,TEXT);paramsTitle.setTypeface(null,Typeface.BOLD);
@@ -253,6 +294,72 @@ public final class MainActivity extends Activity {
     }
 
     private String[] qualityNames(){return new String[]{UiText.text(R.string.economy),UiText.text(R.string.balanced),UiText.text(R.string.high_quality),UiText.text(R.string.custom)};}
+    private void updateTransportUi(){
+        boolean usb=connectionType.equals("usb");
+        transportPicker.setText(UiText.text(usb?R.string.usb_adb:R.string.network_adb)+"  ▾");
+        networkAddress.setVisibility(usb?View.GONE:View.VISIBLE);networkHint.setVisibility(usb?View.GONE:View.VISIBLE);usbAddress.setVisibility(usb?View.VISIBLE:View.GONE);
+        java.util.List<UsbDevice> devices=UsbAdb.devices(usbManager);
+        if(selectedUsb!=null && devices.stream().noneMatch(d -> d.getDeviceName().equals(selectedUsb.getDeviceName())))selectedUsb=null;
+        if(selectedUsb==null){
+            java.util.List<UsbDevice> matching=new java.util.ArrayList<>();
+            for(UsbDevice d:devices)if(d.getVendorId()==profile.usbVendor && d.getProductId()==profile.usbProduct
+                    && (profile.usbSerial.isEmpty() || profile.usbSerial.equals(UsbAdb.serial(usbManager,d))))matching.add(d);
+            if(matching.size()==1)selectedUsb=matching.get(0);
+            else if(devices.size()==1)selectedUsb=devices.get(0);
+        }
+        usbPicker.setText((selectedUsb==null?UiText.text(R.string.choose_usb_device):UsbAdb.label(selectedUsb))+"  ▾");
+        usbHint.setText(UiText.text(getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_USB_HOST)?R.string.usb_instructions:R.string.usb_host_unavailable));
+    }
+    private void chooseUsbDevice(){
+        updateTransportUi();java.util.List<UsbDevice> devices=UsbAdb.devices(usbManager);
+        if(devices.isEmpty()){toast(UiText.text(R.string.usb_no_devices));return;}
+        String[] labels=new String[devices.size()];int selected=-1;
+        for(int i=0;i<devices.size();i++){
+            UsbDevice d=devices.get(i);String serial=UsbAdb.serial(usbManager,d);
+            labels[i]=UsbAdb.label(d)+(serial.isEmpty()?(devices.size()>1?" · #"+(i+1):""):" · "+serial);
+            if(selectedUsb!=null && d.getDeviceName().equals(selectedUsb.getDeviceName()))selected=i;
+        }
+        choiceMenu(usbPicker,labels,selected,index -> {cancelUsbPermission();selectedUsb=devices.get(index);updateTransportUi();});
+    }
+    private void usbAttachedIntent(Intent intent){
+        if(mirroring || !UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction()))return;
+        Object value=intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+        if(value instanceof UsbDevice && UsbAdb.adbInterface((UsbDevice)value)!=null){
+            cancelUsbPermission();connectionType="usb";selectedUsb=(UsbDevice)value;updateTransportUi();
+        }
+    }
+    private void handleUsbEvent(Intent intent){
+        Object value=intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+        UsbDevice device=value instanceof UsbDevice?(UsbDevice)value:null;
+        if((getPackageName()+".USB_PERMISSION").equals(intent.getAction())){
+            if(pendingUsbProfile==null || usbPermissionUri==null || !usbPermissionUri.equals(intent.getData()))return;
+            if(device!=null && device.getDeviceName().equals(pendingUsbProfile.usbDeviceName)
+                    && intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED,false) && usbManager.hasPermission(device)){
+                usbGranted=true;completeUsbPermission();
+            }else{cancelUsbPermission();toast(UiText.text(R.string.usb_permission_denied));}
+            return;
+        }
+        if(UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction()) && device!=null){
+            if(pendingUsbProfile!=null && device.getDeviceName().equals(pendingUsbProfile.usbDeviceName))cancelUsbPermission();
+            if(activeUsb!=null && device.getDeviceName().equals(activeUsb.getDeviceName()))disconnect(UiText.text(R.string.usb_disconnected));
+        }
+        if(!mirroring && usbPicker!=null)updateTransportUi();
+    }
+    private void completeUsbPermission(){
+        if(!resumed || !usbGranted || pendingUsbProfile==null)return;
+        Profile p=pendingUsbProfile;UsbDevice device=usbManager==null?null:usbManager.getDeviceList().get(p.usbDeviceName);cancelUsbPermission();
+        if(device==null || !usbManager.hasPermission(device)){toast(UiText.text(R.string.usb_not_connected));return;}
+        usbReady(p,device);
+    }
+    private void usbReady(Profile p,UsbDevice device){
+        String serial=UsbAdb.serial(usbManager,device);
+        if(!p.name.isEmpty() && profile.isUsb() && !profile.usbSerial.isEmpty() && !serial.isEmpty() && !serial.equals(profile.usbSerial))p.name="";
+        p.usbSerial=serial;p.usbLabel=UsbAdb.label(device);p.usbVendor=device.getVendorId();p.usbProduct=device.getProductId();p.usbDeviceName=device.getDeviceName();
+        selectedUsb=device;persist(p);showMirror(p);
+    }
+    private void cancelUsbPermission(){
+        if(usbPermission!=null)usbPermission.cancel();usbPermission=null;usbPermissionUri=null;pendingUsbProfile=null;usbGranted=false;
+    }
     private int currentQuality(){
         if(size==null || bitrate==null || fps==null || codec==null)return 3;
         int[] sizes={1024,1600,2400},bits={2,6,12},rates={30,60,60};
@@ -287,11 +394,13 @@ public final class MainActivity extends Activity {
         });
     }
     private void refreshFormLanguage(){
+        String method=connectionType;UsbDevice selection=selectedUsb;
         String[] values={host.getText().toString(),port.getText().toString(),size.getText().toString(),bitrate.getText().toString(),fps.getText().toString()};
         boolean[] flags={showNavigation.isChecked(),viewOnly.isChecked(),forwardAudio.isChecked(),forwardMic.isChecked(),syncRotation.isChecked(),stayAwake.isChecked()};
         int encoding=codec.getSelectedItemPosition(),scrollY=formScroll.getScrollY();
         showForm();EditText[] fields={host,port,size,bitrate,fps};for(int i=0;i<fields.length;i++)fields[i].setText(values[i]);
         showNavigation.setChecked(flags[0]);viewOnly.setChecked(flags[1]);forwardAudio.setChecked(flags[2]);forwardMic.setChecked(flags[3]);syncRotation.setChecked(flags[4]);stayAwake.setChecked(flags[5]);codec.setSelection(encoding);
+        connectionType=method;selectedUsb=selection;updateTransportUi();
         formScroll.post(() -> formScroll.scrollTo(0,scrollY));updateQuality();
     }
     private void refreshMirrorLanguage(){
@@ -400,7 +509,7 @@ public final class MainActivity extends Activity {
             JSONArray saved=savedProfiles();JSONObject current=profile.json();
             for(int i=0;i<saved.length();i++){
                 JSONObject item=saved.getJSONObject(i);
-                if(item.optString("name").equals(profile.name) && item.optString("host").equals(profile.host) && item.optInt("port")==profile.port){
+                if(item.optString("name").equals(profile.name) && Profile.from(item).sameEndpoint(profile)){
                     for(String key:new String[]{"showNavigation","forwardAudio","forwardMic","stayAwake","syncRotation"})item.put(key,current.get(key));
                 }
             }
@@ -410,19 +519,31 @@ public final class MainActivity extends Activity {
 
     private Profile readForm() {
         Profile p = new Profile(); p.name = profile.name; p.host = host.getText().toString().trim();
+        p.transport=connectionType;
+        if(p.isUsb() && selectedUsb!=null){
+            p.usbDeviceName=selectedUsb.getDeviceName();p.usbLabel=UsbAdb.label(selectedUsb);p.usbVendor=selectedUsb.getVendorId();p.usbProduct=selectedUsb.getProductId();p.usbSerial=UsbAdb.serial(usbManager,selectedUsb);
+        }
         try {
-            p.port = Integer.parseInt(port.getText().toString()); p.maxSize = Integer.parseInt(size.getText().toString());
+            p.port = p.isUsb()?profile.port:Integer.parseInt(port.getText().toString()); p.maxSize = Integer.parseInt(size.getText().toString());
             p.bitrate = Integer.parseInt(bitrate.getText().toString()); p.fps = Integer.parseInt(fps.getText().toString());
         } catch (NumberFormatException e) { throw new IllegalArgumentException(UiText.text(R.string.enter_valid_numbers_in_all_numeric_fields)); }
-        if (!p.host.equals(profile.host) || p.port != profile.port) p.name = "";
+        if (!p.sameEndpoint(profile)) p.name = "";
         p.codec = codec.getSelectedItemPosition() == 1 ? "h265" : "h264";
         p.showNavigation = showNavigation.isChecked(); p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked();p.forwardAudio=forwardAudio.isChecked();p.forwardMic=forwardMic.isChecked();p.syncRotation=syncRotation.isChecked(); p.validate(); return p;
     }
     private void connectProfile(Profile p) {
+        UsbDevice device=p.isUsb() && usbManager!=null?usbManager.getDeviceList().get(p.usbDeviceName):null;
+        if(p.isUsb() && (device==null || UsbAdb.adbInterface(device)==null)){toast(UiText.text(R.string.usb_not_connected));return;}
         if(p.forwardMic && !p.viewOnly && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
             permissionProfile=p;requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},41);return;
         }
-        showMirror(p);
+        if(!p.isUsb()){showMirror(p);return;}
+        if(usbManager.hasPermission(device)){usbReady(p,device);return;}
+        cancelUsbPermission();pendingUsbProfile=p;usbGranted=false;
+        usbPermissionUri=Uri.parse("scrcpy-usb://permission/"+java.util.UUID.randomUUID());
+        Intent grant=new Intent(getPackageName()+".USB_PERMISSION").setPackage(getPackageName()).setData(usbPermissionUri);
+        usbPermission=PendingIntent.getBroadcast(this,0,grant,Build.VERSION.SDK_INT>=31?PendingIntent.FLAG_MUTABLE:0);
+        try{usbManager.requestPermission(device,usbPermission);}catch(RuntimeException e){cancelUsbPermission();toast(UiText.text(R.string.usb_permission_denied));}
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
         super.onRequestPermissionsResult(request,permissions,results);
@@ -437,7 +558,7 @@ public final class MainActivity extends Activity {
             return;
         }
         Profile pending=permissionProfile;permissionProfile=null;
-        if(pending!=null && results.length>0 && results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)showMirror(pending);
+        if(pending!=null && results.length>0 && results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)connectProfile(pending);
         else toast(UiText.text(R.string.microphone_permission_is_required_you_can_turn_off_microphone_fo));
     }
     private void persist(Profile p) {
@@ -457,7 +578,7 @@ public final class MainActivity extends Activity {
         final Profile p;
         try { p=readForm(); } catch(Exception e) { toast(UiText.error(e));return; }
         LinearLayout body=configPanel(UiText.text(R.string.save_connection_profile),UiText.text(R.string.saves_the_address_video_and_control_settings_saving_the_same_nam));
-        EditText name=field(body,UiText.text(R.string.profile_name),p.name.isEmpty()?p.host+":"+p.port:p.name,false);
+        EditText name=field(body,UiText.text(R.string.profile_name),p.name.isEmpty()?p.endpoint():p.name,false);
         name.setInputType(InputType.TYPE_CLASS_TEXT);name.setSingleLine(true);
         name.setImeOptions(EditorInfo.IME_ACTION_DONE|EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         name.setHint(UiText.text(R.string.e_g_work_phone));name.setHintTextColor(MUTED);
@@ -549,7 +670,7 @@ public final class MainActivity extends Activity {
         if (!last) lp.setMarginEnd(dp(8)); row.addView(button,lp);
     }
     private boolean isCurrentConfig(Profile p) {
-        return !p.name.isEmpty() && p.name.equals(profile.name) && p.host.equals(profile.host) && p.port == profile.port;
+        return !p.name.isEmpty() && p.name.equals(profile.name) && p.sameEndpoint(profile);
     }
     private void loadProfiles() {
         JSONArray saved = savedProfiles();
@@ -588,13 +709,13 @@ public final class MainActivity extends Activity {
             for (int i=0;i<saved.length();i++) {
                 final int index=i; Profile p=Profile.from(saved.optJSONObject(i));
                 LinearLayout entry=row(); entry.setPadding(dp(12),dp(12),dp(12),dp(12));
-                entry.setContentDescription(p.name+"\n"+p.host+":"+p.port); entry.setFocusable(true); entry.setClickable(true);
+                entry.setContentDescription(p.name+"\n"+p.endpoint()); entry.setFocusable(true); entry.setClickable(true);
                 ImageView mark=new ImageView(this); mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
                 LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(22),dp(22));mp.setMarginEnd(dp(12));entry.addView(mark,mp);
                 LinearLayout details=column();
-                TextView name=label(p.name.isEmpty()?p.host:p.name,15,TEXT);name.setTypeface(null,Typeface.BOLD);
+                TextView name=label(p.name.isEmpty()?p.endpoint():p.name,15,TEXT);name.setTypeface(null,Typeface.BOLD);
                 name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);add(details,name,-2);gap(details,3);
-                TextView address=label(p.host+":"+p.port,12,MUTED);address.setSingleLine(true);
+                TextView address=label(p.endpoint(),12,MUTED);address.setSingleLine(true);
                 address.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);add(details,address,-2);
                 entry.addView(details,new LinearLayout.LayoutParams(0,-2,1));
                 if (isCurrentConfig(p)) {
@@ -615,7 +736,7 @@ public final class MainActivity extends Activity {
         delete.setOnClickListener(v -> {
             if (selected[0]<0) return;
             final int index=selected[0]; Profile p=Profile.from(saved.optJSONObject(index));
-            LinearLayout confirmPanel=configPanel(UiText.format(R.string.delete_named_title,p.name),p.host+":"+p.port+UiText.text(R.string.this_removes_the_saved_connection_settings_for_this_device));
+            LinearLayout confirmPanel=configPanel(UiText.format(R.string.delete_named_title,p.name),p.endpoint()+UiText.text(R.string.this_removes_the_saved_connection_settings_for_this_device));
             LinearLayout confirmActions=row();Button keep=button(UiText.text(R.string.cancel),false), remove=button(UiText.text(R.string.delete_profile),false);
             remove.setTextColor(BG);remove.setBackground(background(0xffef9292,14));
             configAction(confirmActions,keep,1,false);configAction(confirmActions,remove,1.4f,true);add(confirmPanel,confirmActions,-2);
@@ -626,7 +747,7 @@ public final class MainActivity extends Activity {
                 if (isCurrentConfig(p)) {
                     profile.name="";configLabel.setText(UiText.text(R.string.connection_profile));
                     Profile last=lastProfile();
-                    if(last.name.equals(p.name) && last.host.equals(p.host) && last.port==p.port){last.name="";persist(last);}
+                    if(last.name.equals(p.name) && last.sameEndpoint(p)){last.name="";persist(last);}
                 }
                 selected[0]=-1;confirm.dismiss();rebuild.run();toast(UiText.text(R.string.profile_deleted));
             });
@@ -641,6 +762,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showMirror(Profile p) {
+        activeUsb=p.isUsb()?selectedUsb:null;final UsbDevice usb=activeUsb;
         profile = p;connectedDevice=null; keyboardVisible = false; mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
         View focus = getCurrentFocus();
         if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
@@ -761,7 +883,7 @@ public final class MainActivity extends Activity {
         surface.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder holder) {
                 if (token != generation || session != null) return;
-                session = new ScrcpySession(MainActivity.this, p, holder.getSurface(), new ScrcpySession.Listener() {
+                session = new ScrcpySession(MainActivity.this, p, usb, holder.getSurface(), new ScrcpySession.Listener() {
                     private void ui(Runnable r) { runOnUiThread(() -> { if (token == generation) r.run(); }); }
                     @Override public void status(String text) { ui(() -> updateConnectionStatus(text)); }
                     @Override public void size(int w, int h) { ui(() -> { videoWidth = w; videoHeight = h; fitVideo(); }); }
@@ -944,6 +1066,7 @@ public final class MainActivity extends Activity {
         });
     }
     private void disconnect(String error) {
+        activeUsb=null;
         permissionForRuntimeMic=false;
         if(choicePopup!=null)choicePopup.dismiss();
         Dialog settings=settingsDialog;settingsDialog=null;if(settings!=null)settings.dismiss();
@@ -961,7 +1084,10 @@ public final class MainActivity extends Activity {
         else if(languageChanged)refreshFormLanguage();
     }
     @Override protected void onStop() { super.onStop(); if (mirroring) disconnect(UiText.text(R.string.left_the_remote_screen_connection_closed)); }
-    @Override protected void onDestroy() { if (session != null) session.close(); super.onDestroy(); }
+    @Override protected void onResume(){super.onResume();resumed=true;completeUsbPermission();if(!mirroring && usbPicker!=null)updateTransportUi();}
+    @Override protected void onPause(){resumed=false;super.onPause();}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);usbAttachedIntent(intent);}
+    @Override protected void onDestroy() { cancelUsbPermission();unregisterReceiver(usbEvents);if (session != null) session.close(); super.onDestroy(); }
     @Override public void onBackPressed() {
         if (mirroring) {
             android.util.Log.d("RemoteGesture", "LOCAL_BACK_FORWARD");
