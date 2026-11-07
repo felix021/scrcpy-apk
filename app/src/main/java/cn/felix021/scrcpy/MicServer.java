@@ -31,7 +31,7 @@ public final class MicServer {
         MicServer server=new MicServer();
         try {server.run(args[0]);}
         catch(Throwable e){e.printStackTrace(System.err);}
-        finally {server.close();if(args.length>1)new File(args[1]).delete();}
+        finally {server.close();if(args.length>1 && !(args.length>2 && args[2].equals("keep")))new File(args[1]).delete();System.out.println("MIC_CLOSED");System.out.flush();}
         System.exit(0);
     }
     private void run(String name) throws Exception {
@@ -76,7 +76,7 @@ public final class MicServer {
         try {
             DataInputStream input=new DataInputStream(socket.getInputStream());
             while(!closed.get()) {
-                int length=input.readUnsignedShort();
+                int length=input.readUnsignedShort();if(length==0)break;
                 if(length<2 || length>4096 || (length&1)!=0)throw new IllegalArgumentException("Invalid microphone frame");
                 byte[] bytes=new byte[length];input.readFully(bytes);
                 if(!frames.offer(bytes)){frames.poll();frames.offer(bytes);}

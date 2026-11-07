@@ -22,9 +22,11 @@ final class AudioPlayback {
     private volatile AudioTrack track;
     private volatile Thread output;
     private final Thread input;
+    private final boolean standalone;
+    private final java.util.concurrent.CountDownLatch released=new java.util.concurrent.CountDownLatch(1);
 
-    AudioPlayback(Context context,AdbStream stream,Consumer<String> warning) {
-        this.stream=stream;this.warning=warning;manager=(AudioManager)context.getSystemService(Context.AUDIO_SERVICE);
+    AudioPlayback(Context context,AdbStream stream,boolean standalone,Consumer<String> warning) {
+        this.stream=stream;this.standalone=standalone;this.warning=warning;manager=(AudioManager)context.getSystemService(Context.AUDIO_SERVICE);
         input=new Thread(this::run,"scrcpy-audio-input");input.start();
     }
     private void run() {
@@ -42,16 +44,17 @@ final class AudioPlayback {
                     int n=Math.min(len,packet.length-offset);System.arraycopy(packet,offset,b,off,n);offset+=n;return n;
                 }
             });
+            if(standalone && data.readUnsignedByte()!=0)throw new IOException(UiText.text(R.string.invalid_audio_service_handshake));
             int id=data.readInt();
-            if(id==0 || id==1)throw new IOException("远端无法采集系统声音（需要 Android 11 或更高版本）");
-            if(id!=0x00616163)throw new IOException("远端声音编码不支持");
+            if(id==0 || id==1)throw new IOException(UiText.text(R.string.remote_system_audio_capture_is_unavailable_requires_android_11_o));
+            if(id!=0x00616163)throw new IOException(UiText.text(R.string.unsupported_remote_audio_codec));
             while(!stopped.get()) {
                 long pts=data.readLong();int length=data.readInt();
-                if(length<1 || length>1024*1024)throw new IOException("无效的声音数据");
+                if(length<1 || length>1024*1024)throw new IOException(UiText.text(R.string.invalid_audio_data));
                 byte[] packet=new byte[length];data.readFully(packet);
                 boolean config=(pts&(1L<<62))!=0;
                 if(codec==null) {
-                    if(!config)throw new IOException("缺少声音编码信息");
+                    if(!config)throw new IOException(UiText.text(R.string.missing_audio_codec_configuration));
                     MediaFormat format=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,48000,2);
                     format.setByteBuffer("csd-0",ByteBuffer.wrap(packet));
                     codec=MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
@@ -62,7 +65,7 @@ final class AudioPlayback {
                 int index;
                 do {if(stopped.get())return;index=codec.dequeueInputBuffer(10000);}while(index<0);
                 ByteBuffer buffer=codec.getInputBuffer(index);
-                if(buffer==null || buffer.capacity()<length)throw new IOException("声音帧过大");
+                if(buffer==null || buffer.capacity()<length)throw new IOException(UiText.text(R.string.audio_frame_too_large));
                 buffer.clear();buffer.put(packet);
                 codec.queueInputBuffer(index,0,length,pts&((1L<<61)-1),config ? MediaCodec.BUFFER_FLAG_CODEC_CONFIG : 0);
             }
@@ -77,7 +80,7 @@ final class AudioPlayback {
                 if(index==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     MediaFormat format=codec.getOutputFormat();int rate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
                     int mask=channels==1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO;
-                    if(channels<1 || channels>2)throw new IOException("声音声道不支持");
+                    if(channels<1 || channels>2)throw new IOException(UiText.text(R.string.unsupported_audio_channels));
                     AudioTrack old=track;if(old!=null)old.release();
                     track=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                             .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setChannelMask(mask).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
@@ -90,7 +93,7 @@ final class AudioPlayback {
                         pcm.position(info.offset);pcm.limit(info.offset+info.size);
                         while(pcm.hasRemaining() && !stopped.get() && focused) {
                             int n=track.write(pcm,pcm.remaining(),AudioTrack.WRITE_NON_BLOCKING);
-                            if(n<0)throw new IOException("本机声音播放失败");
+                            if(n<0)throw new IOException(UiText.text(R.string.local_audio_playback_failed));
                             if(n==0)Thread.sleep(2);
                         }
                         if(!logged){android.util.Log.i("ScrcpyAudio","PLAYBACK_PCM");logged=true;}
@@ -102,7 +105,7 @@ final class AudioPlayback {
     }
     private void fail(String message) {
         android.util.Log.e("ScrcpyAudio","PLAYBACK_FAILED "+message);
-        if(stop())warning.accept("声音转发不可用："+message);
+        if(stop())warning.accept(UiText.text(R.string.audio_forwarding_unavailable)+message);
     }
     private boolean stop() {
         if(!stopped.compareAndSet(false,true))return false;
@@ -111,12 +114,14 @@ final class AudioPlayback {
         return true;
     }
     void close() {stop();}
+    void awaitClosed() throws InterruptedException {released.await(2,java.util.concurrent.TimeUnit.SECONDS);}
     private void release() {
         boolean interrupted=Thread.interrupted();Thread t=output;
         if(t!=null && t!=Thread.currentThread())while(t.isAlive())try{t.join();}catch(InterruptedException e){interrupted=true;}
         AudioTrack a=track;if(a!=null)a.release();
         MediaCodec c=codec;if(c!=null){try{c.stop();}catch(Exception ignored){}c.release();}
         manager.abandonAudioFocus(focus);
+        released.countDown();
         if(interrupted)Thread.currentThread().interrupt();
     }
 }

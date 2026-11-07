@@ -35,6 +35,7 @@ final class ScrcpySession {
         void ready(String device);
         void error(String message);
         void warning(String message);
+        void settingFailed(String key);
     }
     private final Context context;
     private final Profile profile;
@@ -52,19 +53,24 @@ final class ScrcpySession {
     private volatile AdbStream control;
     private volatile Thread worker;
     private volatile Decoder decoder;
-    private volatile RemoteRotation rotation;
-    private volatile AudioPlayback audioPlayback;
+    private volatile RemoteDeviceSettings deviceSettings;
+    private volatile AudioForwarder audioForwarder;
     private volatile MicForwarder microphone;
     private volatile String serverLog = "";
     private ScheduledFuture<?> startupTimeout;
+    private final java.util.concurrent.ExecutorService runtime=Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.atomic.AtomicInteger audioEpoch=new java.util.concurrent.atomic.AtomicInteger(),micEpoch=new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean connectionReady,lastLandscape;
+    private boolean micUploaded;
+    private String serverPath,micPath,micName;
 
     ScrcpySession(Context context, Profile profile, Surface surface, Listener listener) {
-        this.context = context.getApplicationContext(); this.profile = profile;
+        this.context = context.getApplicationContext(); this.profile = profile.copy();
         this.surface = surface; this.listener = listener;
     }
 
     void start() {
-        startupTimeout = timer.schedule(() -> fail("连接超时。请检查网络，并在远端设备上允许 USB 调试授权。"), 60, TimeUnit.SECONDS);
+        startupTimeout = timer.schedule(() -> fail(UiText.text(R.string.connection_timed_out_check_the_network_and_allow_usb_debugging_o)), 60, TimeUnit.SECONDS);
         worker = new Thread(this::run, "scrcpy-video"); worker.start();
     }
 
@@ -81,7 +87,7 @@ final class ScrcpySession {
 
     private void run() {
         try {
-            listener.status("正在连接 ADB · 首次连接请在远端允许调试");
+            listener.status(UiText.text(R.string.connecting_to_adb_allow_debugging_on_the_remote_device));
             AdbCrypto crypto = identity(context);
             checkOpen();
             Socket s = new Socket(); socket = s;
@@ -89,25 +95,21 @@ final class ScrcpySession {
             s.connect(new InetSocketAddress(profile.host, profile.port), 10000);
             AdbConnection connection = AdbConnection.create(s, crypto); adb = connection;
             checkOpen();
-            if (!connection.connect(45, TimeUnit.SECONDS, false)) throw new IOException("ADB 授权超时，请在远端允许调试");
+            if (!connection.connect(45, TimeUnit.SECONDS, false)) throw new IOException(UiText.text(R.string.adb_authorization_timed_out_allow_debugging_on_the_remote_device));
             checkOpen();
-            if(!profile.viewOnly)rotation=new RemoteRotation(connection,this::fail);
-            checkOpen();
-            listener.status("正在准备远端服务");
+            listener.status(UiText.text(R.string.preparing_remote_service));
             String id = String.format(Locale.ROOT, "%08x", new java.security.SecureRandom().nextInt(0x7fffffff));
-            String path = "/data/local/tmp/scrcpy-apk-" + id + ".jar";
-            try(InputStream server=context.getAssets().open("scrcpy-server.jar")){push(connection,path,server);}
-            if(profile.forwardMic && !profile.viewOnly) {
-                String micPath="/data/local/tmp/scrcpy-mic-"+id+".apk";
-                try(InputStream apk=new java.io.FileInputStream(context.getApplicationInfo().sourceDir)){push(connection,micPath,apk);}
-                checkOpen();
-                microphone=new MicForwarder(context,connection,micPath,"scrcpy_mic_"+id,listener::warning);
-            }
+            serverPath="/data/local/tmp/scrcpy-apk-"+id+".jar";
+            micPath="/data/local/tmp/scrcpy-mic-"+id+".apk";micName="scrcpy_mic_"+id;
+            deviceSettings=new RemoteDeviceSettings(connection,serverPath,micPath,this::fail);
+            deviceSettings.awake(profile.stayAwake);
             checkOpen();
-            String command = "CLASSPATH=" + path + " app_process / com.genymobile.scrcpy.Server 5.0.1"
-                    + " scid=" + id + " tunnel_forward=true audio="+profile.forwardAudio+" audio_codec=aac video=true"
-                    + " cleanup=true clipboard_autosync=false power_on=true" + profile.serverOptions();
-            AdbStream shell = connection.open("shell:" + command);
+            try(InputStream server=context.getAssets().open("scrcpy-server.jar")){push(connection,serverPath,server);}
+            checkOpen();
+            String command = "CLASSPATH=" + serverPath + " app_process / com.genymobile.scrcpy.Server 5.0.1"
+                    + " scid=" + id + " tunnel_forward=true audio=false video=true"
+                    + " cleanup=false clipboard_autosync=false power_on=true" + profile.serverOptions();
+            AdbStream shell = connection.open("shell:" + RemoteServerProcess.owned(command));
             new Thread(() -> {
                 try {
                     while (!closed.get()) {
@@ -124,13 +126,9 @@ final class ScrcpySession {
                 try { video = connection.open(destination); break; }
                 catch (IOException e) { Thread.sleep(100); }
             }
-            if (video == null) throw new IOException("远端投屏服务未启动。" + serverLog);
+            if (video == null) throw new IOException(UiText.text(R.string.remote_display_service_did_not_start) + serverLog);
             DataInputStream input = input(video);
-            if (input.readUnsignedByte() != 0) throw new IOException("无效的服务握手");
-            if(profile.forwardAudio) {
-                AdbStream audio=connection.open(destination);
-                audioPlayback=new AudioPlayback(context,audio,listener::warning);
-            }
+            if (input.readUnsignedByte() != 0) throw new IOException(UiText.text(R.string.invalid_service_handshake));
             if (!profile.viewOnly) {
                 control = connection.open(destination);
                 controlWriter = new Thread(() -> {
@@ -155,27 +153,28 @@ final class ScrcpySession {
                                 control.write(java.util.Arrays.copyOfRange(bytes, offset, Math.min(offset + 4096, bytes.length)));
                             }
                         }
-                    } catch (Exception e) { if (!closed.get()) fail("发送控制操作失败"); }
+                    } catch (Exception e) { if (!closed.get()) fail(UiText.text(R.string.could_not_send_control_events)); }
                 }, "scrcpy-control-writer");
                 controlWriter.start();
                 new Thread(() -> {
                     try { while (!closed.get()) control.read(); }
-                    catch (Exception e) { if (!closed.get()) fail("控制连接已断开"); }
+                    catch (Exception e) { if (!closed.get()) fail(UiText.text(R.string.control_connection_closed)); }
                 }, "scrcpy-control-reader").start();
             }
+            connectionReady=true;queueAudio();queueMicrophone();
             byte[] name = new byte[64]; input.readFully(name);
             String device = new String(name, StandardCharsets.UTF_8).replace("\0", "").trim();
             int codecId = input.readInt();
             String mime;
             if (codecId == 0x68323634) mime = "video/avc";
             else if (codecId == 0x68323635) mime = "video/hevc";
-            else throw new IOException("远端编码不可用，请更换编码或降低参数");
-            listener.status("正在接收 " + device + " 的画面");
+            else throw new IOException(UiText.text(R.string.remote_codec_unavailable_try_another_codec_or_lower_settings));
+            listener.status(UiText.text(R.string.receiving) + device + UiText.text(R.string.video));
             while (!closed.get()) {
                 int first = input.readInt(); int second = input.readInt(); int third = input.readInt();
                 if ((first & 0x80000000) != 0) {
                     int width = second, height = third;
-                    if (width < 1 || height < 1 || width > 16384 || height > 16384) throw new IOException("无效的视频尺寸");
+                    if (width < 1 || height < 1 || width > 16384 || height > 16384) throw new IOException(UiText.text(R.string.invalid_video_dimensions));
                     if (decoder != null) decoder.close();
                     listener.size(width, height);
                     decoder = new Decoder(mime, width, height, device);
@@ -183,9 +182,9 @@ final class ScrcpySession {
                 }
                 long ptsFlags = ((long) first << 32) | (second & 0xffffffffL);
                 int length = third;
-                if (length < 1 || length > 16 * 1024 * 1024) throw new IOException("无效的视频帧长度");
+                if (length < 1 || length > 16 * 1024 * 1024) throw new IOException(UiText.text(R.string.invalid_video_frame_length));
                 byte[] packet = new byte[length]; input.readFully(packet);
-                if (decoder == null) throw new IOException("缺少视频尺寸信息");
+                if (decoder == null) throw new IOException(UiText.text(R.string.missing_video_dimensions));
                 boolean config = (ptsFlags & (1L << 62)) != 0;
                 decoder.feed(packet, config ? 0 : ptsFlags & ((1L << 61) - 1), config);
             }
@@ -210,7 +209,7 @@ final class ScrcpySession {
                     .put("DONE".getBytes(StandardCharsets.US_ASCII)).putInt((int) (System.currentTimeMillis() / 1000)).array());
             DataInputStream in = input(stream);
             byte[] response = new byte[8]; in.readFully(response);
-            if (!new String(response, 0, 4, StandardCharsets.US_ASCII).equals("OKAY")) throw new IOException("上传服务失败");
+            if (!new String(response, 0, 4, StandardCharsets.US_ASCII).equals("OKAY")) throw new IOException(UiText.text(R.string.could_not_upload_remote_service));
         }
     }
 
@@ -229,7 +228,7 @@ final class ScrcpySession {
                 if (len == 0) return 0;
                 while (offset == packet.length) {
                     try { packet = stream.read(); offset = 0; }
-                    catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("连接已取消", e); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException(UiText.text(R.string.connection_cancelled), e); }
                 }
                 int n = Math.min(len, packet.length - offset);
                 System.arraycopy(packet, offset, b, off, n); offset += n; return n;
@@ -241,8 +240,68 @@ final class ScrcpySession {
     void key(int keycode, int metaState) { send(Protocol.chord(keycode, metaState)); }
     void paste(String text) { send(Protocol.paste(text)); }
     void orientation(boolean landscape) {
-        RemoteRotation r=rotation;
-        if(!closed.get() && !gracefulClosing.get() && r!=null)r.set(landscape);
+        lastLandscape=landscape;
+        RemoteDeviceSettings settings=deviceSettings;
+        if(!closed.get() && !gracefulClosing.get() && settings!=null)
+            settings.rotation(profile.syncRotation && !profile.viewOnly ? landscape : null);
+    }
+    void syncRotation(boolean enabled) {profile.syncRotation=enabled;orientation(lastLandscape);}
+    void stayAwake(boolean enabled) {
+        profile.stayAwake=enabled;RemoteDeviceSettings settings=deviceSettings;
+        if(!closed.get() && !gracefulClosing.get() && settings!=null)settings.awake(enabled);
+    }
+    void playback(boolean enabled) {
+        profile.forwardAudio=enabled;audioEpoch.incrementAndGet();
+        if(!enabled){AudioForwarder audio=audioForwarder;if(audio!=null)audio.close();}
+        queueAudio();
+    }
+    void microphone(boolean enabled) {
+        profile.forwardMic=enabled && !profile.viewOnly;micEpoch.incrementAndGet();
+        if(!profile.forwardMic){MicForwarder mic=microphone;if(mic!=null)mic.close();}
+        queueMicrophone();
+    }
+    private void queueAudio() {
+        if(!connectionReady || closed.get() || gracefulClosing.get())return;
+        try{runtime.execute(() -> {
+            try {
+                AudioForwarder old=audioForwarder;
+                if(old!=null && (!profile.forwardAudio || old.isClosed())){old.close();old.awaitClosed();audioForwarder=null;}
+                if(profile.forwardAudio && audioForwarder==null && !closed.get() && !gracefulClosing.get()) {
+                    int epoch=audioEpoch.get();
+                    AudioForwarder next=new AudioForwarder(context,adb,serverPath,message -> {
+                        if(epoch==audioEpoch.get() && !closed.get() && !gracefulClosing.get()) {
+                            profile.forwardAudio=false;listener.settingFailed("forwardAudio");listener.warning(message);
+                        }
+                    });
+                    audioForwarder=next;if(closed.get() || gracefulClosing.get() || !profile.forwardAudio)next.close();
+                }
+            }catch(InterruptedException e){Thread.currentThread().interrupt();}
+        });}catch(java.util.concurrent.RejectedExecutionException ignored){}
+    }
+    private void queueMicrophone() {
+        if(!connectionReady || closed.get() || gracefulClosing.get())return;
+        try{runtime.execute(() -> {
+            try {
+                MicForwarder old=microphone;
+                if(old!=null && (!profile.forwardMic || old.isClosed())){old.close();old.awaitClosed();microphone=null;}
+                if(profile.forwardMic && !profile.viewOnly && microphone==null && !closed.get() && !gracefulClosing.get()) {
+                    int epoch=micEpoch.get();
+                    if(!micUploaded){
+                        try(InputStream apk=new java.io.FileInputStream(context.getApplicationInfo().sourceDir)){push(adb,micPath,apk);}
+                        micUploaded=true;
+                    }
+                    if(!profile.forwardMic || closed.get() || gracefulClosing.get())return;
+                    MicForwarder next=new MicForwarder(context,adb,micPath,micName,message -> {
+                        if(epoch==micEpoch.get() && !closed.get() && !gracefulClosing.get()) {
+                            profile.forwardMic=false;listener.settingFailed("forwardMic");listener.warning(message);
+                        }
+                    });
+                    microphone=next;if(closed.get() || gracefulClosing.get() || !profile.forwardMic)next.close();
+                }
+            }catch(Exception e){
+                if(!closed.get() && !gracefulClosing.get()){profile.forwardMic=false;listener.settingFailed("forwardMic");listener.warning(UiText.text(R.string.could_not_start_microphone_forwarding));}
+            }
+        });}catch(java.util.concurrent.RejectedExecutionException ignored){}
     }
     void expandSettings() { send(new byte[]{6}); }
     void touch(int action, long pointer, int x, int y, int w, int h, float pressure) {
@@ -250,18 +309,19 @@ final class ScrcpySession {
     }
     private void send(byte[] bytes) {
         if (profile.viewOnly || closed.get() || gracefulClosing.get() || control == null) return;
-        if (!controls.offer(bytes) && !closed.get()) fail("控制连接拥塞，请重新连接");
+        if (!controls.offer(bytes) && !closed.get()) fail(UiText.text(R.string.control_connection_congested_please_reconnect));
     }
 
-    private void checkOpen() throws IOException { if (closed.get()) throw new IOException("连接已取消"); }
+    private void checkOpen() throws IOException { if (closed.get() || gracefulClosing.get()) throw new IOException(UiText.text(R.string.connection_cancelled)); }
     private void fail(String message) { if (close()) listener.error(message); }
 
     void closeGracefully() {
         if(closed.get() || !gracefulClosing.compareAndSet(false,true))return;
         closeAudio();
-        RemoteRotation r=rotation;
-        if(r==null)finishControls();else r.finish(this::finishControls);
-        try {timer.schedule(this::close,2500,TimeUnit.MILLISECONDS);}
+        runtime.shutdownNow();
+        RemoteDeviceSettings settings=deviceSettings;
+        if(settings==null)finishControls();else settings.finish(this::finishControls);
+        try {timer.schedule(this::close,4000,TimeUnit.MILLISECONDS);}
         catch(java.util.concurrent.RejectedExecutionException e){close();}
     }
     private void finishControls() {
@@ -270,13 +330,14 @@ final class ScrcpySession {
 
     private void closeAudio() {
         MicForwarder mic=microphone;if(mic!=null)mic.close();
-        AudioPlayback audio=audioPlayback;if(audio!=null)audio.close();
+        AudioForwarder audio=audioForwarder;if(audio!=null)audio.close();
     }
 
     boolean close() {
         if (!closed.compareAndSet(false, true)) return false;
         closeAudio();
-        RemoteRotation r=rotation;if(r!=null)r.close();
+        runtime.shutdownNow();
+        RemoteDeviceSettings settings=deviceSettings;if(settings!=null)settings.close();
         timer.shutdownNow(); controls.clear();
         Thread writer = controlWriter; if (writer != null) writer.interrupt();
         // Closing the transport unblocks all ADB readers/writers; codec teardown
@@ -313,14 +374,14 @@ final class ScrcpySession {
                             }
                         }
                     }
-                } catch (RuntimeException e) { if (!stopped && !closed.get() && !gracefulClosing.get()) fail("视频解码失败，请降低参数或更换编码"); }
+                } catch (RuntimeException e) { if (!stopped && !closed.get() && !gracefulClosing.get()) fail(UiText.text(R.string.video_decoding_failed_lower_the_settings_or_change_codec)); }
             }, "scrcpy-render"); output.start();
         }
         void feed(byte[] bytes, long pts, boolean config) throws IOException {
             int index;
             do { checkOpen(); index = codec.dequeueInputBuffer(10000); } while (index < 0);
             ByteBuffer buffer = codec.getInputBuffer(index);
-            if (buffer == null || buffer.capacity() < bytes.length) throw new IOException("视频帧过大，请降低分辨率");
+            if (buffer == null || buffer.capacity() < bytes.length) throw new IOException(UiText.text(R.string.video_frame_too_large_lower_the_resolution));
             buffer.clear(); buffer.put(bytes);
             codec.queueInputBuffer(index, 0, bytes.length, pts, config ? MediaCodec.BUFFER_FLAG_CODEC_CONFIG : 0);
         }

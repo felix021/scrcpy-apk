@@ -28,7 +28,7 @@ final class RemoteKeyboard extends LinearLayout {
     RemoteKeyboard(Context context, Listener listener) {
         super(context); this.listener = listener;
         setOrientation(VERTICAL); setBackgroundColor(0xff111c25);
-        setPadding(dp(4), dp(5), dp(4), dp(5)); setContentDescription("完整虚拟键盘"); render();
+        setPadding(dp(4), dp(5), dp(4), dp(5)); setContentDescription(UiText.text(R.string.full_virtual_keyboard)); render();
     }
     private int dp(float n) { return Math.round(n * getResources().getDisplayMetrics().density); }
     private GradientDrawable bg(int color) {
@@ -37,6 +37,7 @@ final class RemoteKeyboard extends LinearLayout {
     void setFillHeight(boolean fill) {
         if (fillHeight != fill) { fillHeight = fill; repeats.removeCallbacksAndMessages(null); render(); }
     }
+    void refreshLabels(){setContentDescription(UiText.text(R.string.full_virtual_keyboard));render();}
     void reset() { repeats.removeCallbacksAndMessages(null); state.clear(); render(); }
     @Override protected void onDetachedFromWindow() {
         repeats.removeCallbacksAndMessages(null); state.clear(); super.onDetachedFromWindow();
@@ -88,22 +89,22 @@ final class RemoteKeyboard extends LinearLayout {
         int extra = (KeyboardState.needsShift(value)) ? 0x41 : 0;
         // Caps only affects letters, without applying Shift to punctuation/numbers.
         int code = KeyboardState.code(Character.toLowerCase(value));
-        key(row,String.valueOf(value),"字符 " + value,code,extra,1,false);
+        key(row,String.valueOf(value),UiText.text(R.string.character) + value,code,extra,1,false);
     }
     private void render() {
         repeats.removeCallbacksAndMessages(null); removeAllViews();
         // oh-my-term's two control rows: keep the navigation cross and paired
         // Home/End, PgUp/PgDn in fixed columns, independent of the Fn layer.
         LinearLayout firstControls = row(), secondControls = row();
-        key(firstControls,state.fn>0 ? "Menu" : "Esc",state.fn>0 ? "菜单键" : "Escape",state.fn>0 ? 82 : 111,0,1,true);
+        key(firstControls,state.fn>0 ? "Menu" : "Esc",state.fn>0 ? UiText.text(R.string.menu_key) : "Escape",state.fn>0 ? 82 : 111,0,1,true);
         ctrlButton = button(firstControls,"Ctrl","Ctrl",1,() -> { state.ctrl=KeyboardState.toggle(state.ctrl); render(); });
         ctrlButton.setOnLongClickListener(v -> { state.ctrl=KeyboardState.lock(state.ctrl); render(); return true; }); modifierAppearance(ctrlButton,state.ctrl);
-        key(firstControls,"Home","Home 键",122,0,1,true);
+        key(firstControls,"Home",UiText.text(R.string.home_key),122,0,1,true);
         key(firstControls,"↑","Up",19,0,1,true);
         key(firstControls,"End","End",123,0,1,true);
         key(firstControls,"PgUp","PgUp",92,0,1,true);
         if (state.fn > 0) key(firstControls,"F11","F11",141,0,1,false);
-        else button(firstControls,"文字","输入文字",1,() -> { reset();listener.text(); });
+        else button(firstControls,UiText.text(R.string.text_2),UiText.text(R.string.enter_text),1,() -> { reset();listener.text(); });
         key(firstControls,"Del","Delete",112,0,1,true);
         key(secondControls,state.fn>0 ? "Ins" : "Tab",state.fn>0 ? "Insert" : "Tab",state.fn>0 ? 124 : 61,0,1,true);
         altButton = button(secondControls,"Alt","Alt",1,() -> { state.alt=KeyboardState.toggle(state.alt); render(); });
@@ -113,8 +114,8 @@ final class RemoteKeyboard extends LinearLayout {
         key(secondControls,"→","Right",22,0,1,true);
         key(secondControls,"PgDn","PgDn",93,0,1,true);
         if (state.fn > 0) key(secondControls,"F12","F12",142,0,1,false);
-        else button(secondControls,"粘贴","粘贴",1,() -> { reset();listener.paste(); });
-        button(secondControls,"收起","收起键盘",1,listener::close);
+        else button(secondControls,UiText.text(R.string.paste),UiText.text(R.string.paste),1,() -> { reset();listener.paste(); });
+        button(secondControls,UiText.text(R.string.hide),UiText.text(R.string.hide_keyboard),1,listener::close);
         LinearLayout numbers = row();
         String digits = "1234567890";
         for (int i=0;i<digits.length();i++) {
@@ -135,12 +136,12 @@ final class RemoteKeyboard extends LinearLayout {
             for (char c : "zxcvbnm,./".toCharArray()) character(third,c);
         }
         LinearLayout bottom = row();
-        button(bottom,state.symbols ? "ABC" : "#+=","切换符号",1.4f,() -> { state.symbols=!state.symbols; render(); });
+        button(bottom,state.symbols ? "ABC" : "#+=",UiText.text(R.string.switch_symbols),1.4f,() -> { state.symbols=!state.symbols; render(); });
         Button caps = button(bottom,"Caps","Caps Lock",1.4f,() -> { state.caps=!state.caps; render(); });
         modifierAppearance(caps,state.caps ? 2 : 0);
         shiftButton = button(bottom,"Shift","Shift",1.4f,() -> { state.shift=KeyboardState.toggle(state.shift); render(); });
         shiftButton.setOnLongClickListener(v -> { state.shift=KeyboardState.lock(state.shift); render(); return true; }); modifierAppearance(shiftButton,state.shift);
-        key(bottom,"空格","Space",62,0,4,false);
+        key(bottom,UiText.text(R.string.space),"Space",62,0,4,false);
         fnButton = button(bottom,"Fn","Fn",1.4f,() -> { state.fn=KeyboardState.toggle(state.fn); render(); });
         fnButton.setOnLongClickListener(v -> { state.fn=KeyboardState.lock(state.fn); render(); return true; }); modifierAppearance(fnButton,state.fn);
     }

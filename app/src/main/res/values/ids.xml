@@ -1,0 +1,18 @@
+<resources>
+    <item name="language_picker" type="id"/>
+    <item name="quality_picker" type="id"/>
+    <item name="runtime_settings" type="id"/>
+    <item name="scroll_hint" type="id"/>
+    <item name="form_scroll" type="id"/>
+    <item name="option_showNavigation" type="id"/>
+    <item name="option_forwardAudio" type="id"/>
+    <item name="option_forwardMic" type="id"/>
+    <item name="option_stayAwake" type="id"/>
+    <item name="option_syncRotation" type="id"/>
+    <item name="option_keyboard" type="id"/>
+    <item name="runtime_scroll" type="id"/>
+    <item name="runtime_done" type="id"/>
+    <item name="runtime_disconnect" type="id"/>
+    <item name="disconnect_cancel" type="id"/>
+    <item name="disconnect_confirm" type="id"/>
+</resources>

@@ -16,7 +16,7 @@ final class SafeRail extends ViewGroup {
     private final boolean controls, left;
     SafeRail(Context context, boolean controls, boolean left) {
         super(context); this.controls=controls; this.left=left;
-        setContentDescription(controls ? "横屏操作栏" : "横屏连接状态");
+        setContentDescription(controls ? UiText.text(R.string.landscape_controls) : UiText.text(R.string.landscape_connection_status));
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     @Override protected void onMeasure(int w, int h) {

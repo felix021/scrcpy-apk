@@ -37,7 +37,7 @@ final class RemoteInputView extends View {
     };
 
     RemoteInputView(Context context,Listener listener) {
-        super(context);this.listener=listener;setContentDescription("远控触控区");setClickable(true);
+        super(context);this.listener=listener;setContentDescription(UiText.text(R.string.remote_touch_area));setClickable(true);
     }
     private float dp(float n) { return n*getResources().getDisplayMetrics().density; }
     void updateFrame(Rect bounds,int w,int h,boolean controlEnabled) {

@@ -20,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -65,13 +65,15 @@ def dump():
     raise AssertionError('UI hierarchy did not become available')
 
 
-def find(text=None, desc=None, root=None):
+def find(text=None, desc=None, root=None, rid=None):
     if root is None:
         root = dump()
     for n in root.iter('node'):
         if text is not None and n.get('text') == text:
             return n
         if desc is not None and n.get('content-desc') == desc:
+            return n
+        if rid is not None and n.get('resource-id','').endswith('/'+rid):
             return n
     return None
 
@@ -83,11 +85,18 @@ def click(node):
     time.sleep(.5)
 
 
+def begin_disconnect():
+    click(find(rid='runtime_settings'))
+    tap('断开连接')
+
+
 def tap(text):
     if text == '断开':
-        click(find(desc='断开连接'))
+        begin_disconnect()
         tap('确认断开')
         return
+    if text in ['省流','均衡','高清'] and find(text=text) is None:
+        click(find(rid='quality_picker'))
     end = time.monotonic() + 12
     while time.monotonic() < end:
         node = find(text=text)
@@ -103,10 +112,11 @@ def bottom():
     end = time.monotonic() + 25
     while time.monotonic() < end:
         root = dump()
-        if find(text='充电时保持远端唤醒', root=root) is not None:
+        if find(text='充电时保持远端唤醒', root=root) is not None and find(rid='scroll_hint',root=root) is None:
             return root
         if any(n.get('package') == PKG for n in root.iter('node')):
-            shell(a.client, 'input', 'swipe', 1030, 2100, 1030, 600, 400)
+            l,t,r,b=map(int,re.findall(r'\d+',find(rid='form_scroll',root=root).get('bounds')))
+            shell(a.client,'input','swipe',(l+r)//2,b-40,(l+r)//2,t+40,350)
         time.sleep(.3)
     raise AssertionError('Form did not scroll to connection button')
 
@@ -115,9 +125,10 @@ def top():
     end = time.monotonic() + 25
     while time.monotonic() < end:
         root = dump()
-        if find(text='远程控制', root=root) is not None:
+        if find(text='远程控制', root=root) is not None or find(text='Remote control',root=root) is not None:
             return root
-        shell(a.client, 'input', 'swipe', 1030, 600, 1030, 2100, 400)
+        l,t,r,b=map(int,re.findall(r'\d+',find(rid='form_scroll',root=root).get('bounds')))
+        shell(a.client,'input','swipe',(l+r)//2,t+40,(l+r)//2,b-40,350)
         time.sleep(.3)
     raise AssertionError('Form did not scroll to device fields')
 
@@ -178,7 +189,7 @@ def verify_ui():
         assert node is not None
         return tuple(map(int, re.findall(r'\d+', node.get('bounds'))))
     def stay_connected():
-        assert find(desc='断开连接') is not None, 'Local Back or gesture exited remote control'
+        assert find(rid='runtime_settings') is not None, 'Local Back or gesture exited remote control'
     def swipe(edge):
         x1,y1,x2,y2 = bounds(find(desc='远控屏幕'))
         w,h = x2-x1,y2-y1
@@ -324,7 +335,7 @@ def verify_controls():
         for marker in ['LOCAL_BACK_FORWARD','CANCEL']:
             assert after.count(marker)==before.count(marker), marker+' intercepted edge action'
         assert after.count('EDGE_ACTION_'+edge)>before.count('EDGE_ACTION_'+edge), edge+' action missing'
-        assert find(desc='断开连接') is not None
+        assert find(rid='runtime_settings') is not None
     overlays=shell(a.target,'cmd','overlay','list')
     nav=next((line.split()[-1] for line in overlays.splitlines() if line.startswith('[x]') and '.navbar.' in line),None)
     try:
@@ -335,7 +346,7 @@ def verify_controls():
         root=dump()
         n=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务']]
         status=next(node for node in root.iter('node') if '已连接' in node.get('text',''))
-        exit_bounds=bounds(find(desc='断开连接',root=root))
+        exit_bounds=bounds(find(rid='runtime_settings',root=root))
         assert len({v[1] for v in n})==1 and all(abs((v[1]+v[3])//2-(exit_bounds[1]+exit_bounds[3])//2)<12 for v in n)
         assert bounds(status)[2]<=n[0][0] and exit_bounds[0]>=n[-1][2]
         screenshot('13-bottom-navigation')
@@ -371,7 +382,7 @@ def verify_controls():
             assert 'TOUCH ' not in logs()
             record('black letterbox taps do not become remote edge touches')
             shell(a.client,'input','keyevent',4); assert_log('BACK 4')
-            assert find(desc='断开连接') is not None
+            assert find(rid='runtime_settings') is not None
             record('local Back still reaches target and keeps session connected')
         shell(a.target,'cmd','statusbar','collapse')
         shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
@@ -514,7 +525,7 @@ def verify_landscape():
         assert len({n[1] for n in first})==len({n[1] for n in second})==1
         assert first[0][3]<=second[0][1]
         screenshot('33-landscape-two-control-rows')
-        click(find(desc='收起键盘'));click(find(desc='断开连接'));tap('取消');wait_connected()
+        click(find(desc='收起键盘'));begin_disconnect();tap('取消');wait_connected()
         record('two control rows retain their navigation cross in landscape; disconnect cancel keeps session')
         rotate(0);shape(False);tap('断开');bottom();tap('仅观看');connect()
         rotate(1);time.sleep(1)
@@ -540,8 +551,7 @@ def verify_rotation_restoration():
             time.sleep(.2)
         raise AssertionError(('Remote rotation settings differ',values,actual))
     def local(value):
-        shell(a.client,'settings','put','system','accelerometer_rotation',0)
-        shell(a.client,'settings','put','system','user_rotation',value)
+        shell(a.client,'wm','user-rotation','lock',value)
     def video(landscape):
         deadline=time.monotonic()+15
         while time.monotonic()<deadline:
@@ -556,9 +566,13 @@ def verify_rotation_restoration():
     local(0);video(False);expect(('0','0'))
     tap('断开');expect(('1','0'))
     record('auto-rotating target follows explicit local portrait/landscape; disconnect restores original rotation and auto-rotate')
-    connect();start_probe();local(1);video(True);expect(('0','1'))
+    connect();start_probe();local(1);video(True);expect(('0','1'));pid=core_pid()
     shell(a.client,'am','force-stop',PKG);expect(('1','0'))
-    record('force-stopping client still restores remote rotation through remote shell EXIT cleanup')
+    deadline=time.monotonic()+10
+    while pid in shell(a.target,'ps','-A','-o','PID').split():
+        assert time.monotonic()<deadline,'Remote video process survived client termination'
+        time.sleep(.2)
+    record('force-stopping client restores remote rotation and terminates its video process through remote shell EXIT cleanup')
     local(0);shell(a.client,'am','start','-n',PKG+'/.MainActivity');bottom();tap('仅观看')
     original=settings();connect();local(1);wait_connected();time.sleep(.5)
     assert settings()==original
@@ -566,7 +580,7 @@ def verify_rotation_restoration():
     tap('断开');local(0);bottom();tap('仅观看')
 
 
-def verify_audio():
+def verify_audio(live=False):
     def sound(text,enabled):
         bottom();node=find(text=text)
         assert node is not None and node.get('enabled')=='true',text
@@ -594,13 +608,22 @@ def verify_audio():
     bottom()
     if find(text='仅观看').get('checked')=='true':tap('仅观看')
     sound('播放远端声音',False);sound('转发本机麦克风',True)
-    adb(a.client,'logcat','-c');tap('连接设备   →');root=dump()
+    adb(a.client,'logcat','-c')
+    if live:
+        sound('转发本机麦克风',False);connect();live_pid=core_pid();runtime_option('forwardMic',True)
+    else:tap('连接设备   →')
+    root=dump()
     deny=next((n for n in root.iter('node') if n.get('resource-id','').endswith('/permission_deny_button')),None)
     assert deny is not None,'Mic permission was not requested'
-    click(deny);assert find(text='连接设备   →') is not None
+    click(deny)
+    if live:
+        assert core_pid()==live_pid
+        runtime_close();wait_connected()
+    else:
+        assert find(text='连接设备   →') is not None
+        sound('转发本机麦克风',False)
     assert 'MIC_STARTED' not in audio_logs()
-    sound('转发本机麦克风',False)
-    record('microphone permission is requested only when enabled; denying permission keeps form and never starts recording')
+    record('microphone permission is requested only when enabled; denial never starts recording and retains the '+('video session' if live else 'form'))
     shell(a.client,'pm','grant',PKG,'android.permission.RECORD_AUDIO')
     shell(a.target,'pm','grant',PROBE,'android.permission.RECORD_AUDIO')
     source_apk='/data/local/tmp/scrcpy-mic-source-validation.apk'
@@ -636,12 +659,21 @@ def verify_audio():
             except OSError:
                 if not stopping.is_set():raise
         producer=threading.Thread(target=produce,daemon=True);producer.start()
+        previous_mic=False
         for playback,mic in [(False,False),(True,False),(False,True),(True,True)]:
-            sound('播放远端声音',playback);sound('转发本机麦克风',mic)
-            screenshot('40-audio-options-'+str(int(playback))+str(int(mic)))
-            adb(a.client,'logcat','-c');adb(a.target,'logcat','-c');connect()
-            if mic:wait_mic()
-            shell(a.target,'cmd','media_session','volume','--stream',3,'--set',15)
+            adb(a.client,'logcat','-c');adb(a.target,'logcat','-c')
+            # Normalize both outputs before creating playback tracks. Starting a
+            # REMOTE_SUBMIX measurement can otherwise retain their earlier gain.
+            for serial in media_volumes:shell(serial,'cmd','media_session','volume','--stream',3,'--set',15)
+            if live:
+                runtime_option('forwardAudio',playback);runtime_option('forwardMic',mic)
+                screenshot('40-audio-options-'+str(int(playback))+str(int(mic)));runtime_close()
+                assert core_pid()==live_pid
+            else:
+                sound('播放远端声音',playback);sound('转发本机麦克风',mic)
+                screenshot('40-audio-options-'+str(int(playback))+str(int(mic)));connect()
+            if mic and (not live or not previous_mic):wait_mic()
+            previous_mic=mic
             shell(a.target,'am','force-stop',PROBE)
             shell(a.target,'am','start','-W','-n',PROBE+'/.AudioActivity','--es','mode','both','--ei','frequency',1499)
             output=shell(a.client,'CLASSPATH='+capture_apk+' app_process / '+PROBE+'.CaptureOutput')
@@ -653,10 +685,23 @@ def verify_audio():
             tones=[int(n) for n in re.findall(r'tone997=(\d+)',remote)]
             assert tones,'No target AudioRecord measurements'
             assert (max(tones)>1000)==mic,(playback,mic,max(tones),audio_logs())
-            assert ('MIC_STARTED' in audio_logs())==mic
-            assert ('PLAYBACK_PCM' in audio_logs())==playback
+            if not live:
+                assert ('MIC_STARTED' in audio_logs())==mic
+                assert ('PLAYBACK_PCM' in audio_logs())==playback
             record('audio independent switches playback='+str(playback)+' mic='+str(mic)+': actual client output tone1499='+str(amplitude)+', remote recorder tone997='+str(max(tones)))
-            tap('断开');shell(a.target,'am','force-stop',PROBE)
+            if not live:tap('断开')
+            shell(a.target,'am','force-stop',PROBE)
+        if live:
+            runtime_option('forwardMic',False);runtime_option('forwardAudio',False);runtime_close()
+            assert core_pid()==live_pid
+            deadline=time.monotonic()+8
+            while time.monotonic()<deadline:
+                processes=shell(a.target,'ps','-A','-o','ARGS')
+                if '.MicServer ' not in processes and 'video=false audio=true' not in processes:break
+                time.sleep(.2)
+            else:raise AssertionError('Disabled audio services remain running: '+processes)
+            record('all audio combinations changed live while the original video process and connection remained active')
+            tap('断开')
         record('both directions work simultaneously; disabled microphone is never captured and disabled playback produces no forwarded output')
         sound('播放远端声音',original_audio);sound('转发本机麦克风',original_mic)
         connect();tap('断开')
@@ -671,6 +716,164 @@ def verify_audio():
         shell(a.client,'am','force-stop',PKG)
         shell(a.client,'rm','-f',source_apk,capture_apk)
         for serial,volume in media_volumes.items():shell(serial,'cmd','media_session','volume','--stream',3,'--set',volume)
+
+
+def bounds(node):
+    assert node is not None
+    return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+
+
+def runtime_open():
+    root=dump()
+    if find(rid='runtime_scroll',root=root) is None:click(find(rid='runtime_settings',root=root))
+
+
+def runtime_option(key,value):
+    runtime_open()
+    for attempt in range(12):
+        root=dump();node=find(rid='option_'+key,root=root)
+        if node is not None and bounds(node)[3]-bounds(node)[1]>=80:
+            assert node.get('enabled')=='true',key
+            if node.get('checked')!=str(value).lower():click(node)
+            return
+        l,t,r,b=bounds(find(rid='runtime_scroll',root=root))
+        if attempt<5:shell(a.client,'input','swipe',(l+r)//2,b-15,(l+r)//2,t+15,220)
+        else:shell(a.client,'input','swipe',(l+r)//2,t+15,(l+r)//2,b-15,220)
+    raise AssertionError('Runtime setting missing: '+key)
+
+
+def runtime_close():
+    click(find(rid='runtime_done'))
+
+
+def core_pid():
+    lines=shell(a.target,'ps','-A','-o','PID,ARGS').splitlines()
+    found=[line.split()[0] for line in lines if re.match(r'\s*\d+\s+(?:\S*/)?app_process(?:32|64)? / com\.genymobile\.scrcpy\.Server ',line) and 'video=true' in line]
+    assert len(found)==1,found
+    return found[0]
+
+
+def verify_runtime():
+    global old_awake
+    old_awake=shell(a.target,'settings','get','global','stay_on_while_plugged_in').strip()
+    def target_settings(auto,rotation,wake):
+        end=time.monotonic()+10
+        while time.monotonic()<end:
+            actual=tuple(shell(a.target,'settings','get',namespace,key).strip() for namespace,key in [('system','accelerometer_rotation'),('system','user_rotation'),('global','stay_on_while_plugged_in')])
+            if actual==(str(auto),str(rotation),str(wake)):return
+            time.sleep(.2)
+        raise AssertionError(('Device settings differ',actual,(auto,rotation,wake)))
+    def pose(value):
+        shell(a.client,'wm','user-rotation','lock',value);time.sleep(.6)
+    try:
+        shell(a.target,'settings','put','system','accelerometer_rotation',1)
+        shell(a.target,'settings','put','system','user_rotation',0)
+        shell(a.target,'settings','put','global','stay_on_while_plugged_in',0)
+        bottom()
+        for name in ['播放远端声音','转发本机麦克风','充电时保持远端唤醒','同步远端屏幕方向']:
+            node=find(text=name)
+            if node.get('checked')=='true':click(node)
+        tap('省流');top();tap('保存配置');edit('配置名称',test_name);tap('保存')
+        connect();pid=core_pid();target_settings(1,0,0)
+        pose(1);wait_connected();target_settings(1,0,0)
+        record('rotation forwarding can be disabled before connecting; local landscape leaves remote rotation untouched')
+        runtime_option('syncRotation',True);target_settings(0,1,0)
+        runtime_option('stayAwake',True);target_settings(0,1,7)
+        runtime_option('syncRotation',False);target_settings(1,0,7)
+        runtime_option('stayAwake',False);target_settings(1,0,0)
+        runtime_option('syncRotation',True);target_settings(0,1,0)
+        assert core_pid()==pid
+        screenshot('50-runtime-landscape')
+        runtime_close();pose(0);wait_connected();target_settings(0,0,0)
+        record('live orientation and keep-awake controls operate independently, restore originals when off and retain the video process')
+        runtime_option('showNavigation',False);runtime_close();root=dump()
+        assert all(find(desc=d,root=root) is None for d in ['Back','Home','最近任务'])
+        runtime_option('showNavigation',True);runtime_close();root=dump()
+        nav=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务']]
+        assert abs((nav[0][0]+nav[-1][2])/2-540)<3
+        status=next(n for n in root.iter('node') if '已连接' in n.get('text',''))
+        screenshot('50-runtime-navigation-restored')
+        assert bounds(status)[2]<=nav[0][0], (bounds(status),nav)
+        runtime_option('keyboard',True);runtime_close();assert find(desc='完整虚拟键盘') is not None
+        runtime_option('keyboard',False);runtime_close();assert find(desc='完整虚拟键盘') is None
+        assert core_pid()==pid
+        record('navigation and full keyboard can be changed live; restored navigation remains physically centered')
+        runtime_open();screenshot('51-runtime-portrait')
+        click(find(rid='runtime_disconnect'));assert find(rid='disconnect_confirm') is not None
+        click(find(rid='disconnect_cancel'));assert core_pid()==pid
+        runtime_close();tap('断开');target_settings(1,0,0)
+        bottom();assert find(text='同步远端屏幕方向').get('checked')=='true'
+        assert find(text='充电时保持远端唤醒').get('checked')=='false'
+        raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
+        saved=json.loads(next(n.text for n in ET.fromstring(raw) if n.get('name')=='profiles'))
+        current=next(p for p in saved if p['name']==test_name)
+        assert current['syncRotation'] and not current['stayAwake'] and current['showNavigation']
+        assert (current['maxSize'],current['bitrate'],current['fps'],current['codec'])==(1024,2,30,'h264')
+        top();tap('切换配置  ▾');root=dump()
+        click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(test_name+'\n')))
+        tap('删除');tap('删除配置');tap('取消')
+        record('disconnect requires confirmation; cancellation retains session; runtime choices update the saved host without changing video settings')
+    finally:
+        try:shell(a.client,'am','force-stop',PKG)
+        except (subprocess.SubprocessError,OSError) as e:print('Client cleanup pending:',e,flush=True)
+        try:
+            if old_awake=='null':shell(a.target,'settings','delete','global','stay_on_while_plugged_in')
+            else:shell(a.target,'settings','put','global','stay_on_while_plugged_in',old_awake)
+        except (subprocess.SubprocessError,OSError) as e:print('Keep-awake cleanup pending:',e,flush=True)
+
+
+def verify_language():
+    top()
+    def language(option):
+        top();click(find(rid='language_picker'));click(find(desc=option))
+    language('跟随系统');root=dump()
+    assert find(text='Remote control',root=root) is not None
+    title=bounds(find(text='Remote control',root=root));brand=bounds(find(text='SCRCPY / ANDROID',root=root))
+    assert brand[0]>=title[2] and abs((title[1]+title[3])-(brand[1]+brand[3]))<20
+    record('system language is used by default; product signature stays on the same header line')
+    edit('Device IP / hostname','draft-phone.example');edit('Max edge · px','1')
+    language('简体中文');assert find(desc='设备 IP / 主机名').get('text')=='draft-phone.example'
+    assert find(desc='最长边 · px').get('text')=='1'
+    language('English');assert find(desc='Device IP / hostname').get('text')=='draft-phone.example'
+    assert find(desc='Max edge · px').get('text')=='1'
+    shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    assert find(text='Remote control') is not None
+    record('manual language selection preserves unsaved and invalid form values and persists after process restart')
+    click(find(rid='quality_picker'));root=dump();assert find(desc='Economy',root=root) is not None
+    click(find(desc='Economy'));assert find(desc='Max edge · px').get('text')=='1024'
+    assert find(desc='Frame limit · FPS').get('text')=='30'
+    screenshot('52-form-english')
+    language('简体中文');edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));bottom()
+    for name,value in [('仅观看',False),('转发本机麦克风',False),('播放远端声音',False)]:
+        if find(text=name).get('checked')!=str(value).lower():tap(name)
+    shell(a.client,'wm','size','1080x1600');top();root=dump();assert find(rid='scroll_hint',root=root) is not None
+    connect_before=bounds(find(text='连接设备   →',root=root))
+    click(find(rid='scroll_hint'));bottom();root=dump()
+    assert find(rid='scroll_hint',root=root) is None
+    assert bounds(find(text='连接设备   →',root=root))==connect_before
+    screenshot('53-scroll-bottom');shell(a.client,'wm','size','reset');time.sleep(.5)
+    record('scroll continuation hint is visible when content remains, responds to tap, disappears at bottom and never moves the fixed connection button')
+    verify_live_language()
+
+
+def verify_live_language():
+    connect();pid=core_pid();runtime_open()
+    # Scroll the popup to its language row when the screen is short.
+    for _ in range(4):
+        root=dump();picker=find(rid='language_picker',root=root)
+        if picker is not None:break
+        l,t,r,b=bounds(find(rid='runtime_scroll',root=root));shell(a.client,'input','swipe',(l+r)//2,b-20,(l+r)//2,t+20,250)
+    click(picker);click(find(desc='English'))
+    assert find(text='Remote settings') is not None and core_pid()==pid
+    click(find(rid='runtime_done'));click(find(desc='Virtual keyboard'))
+    assert find(desc='Full virtual keyboard') is not None and find(desc='Paste') is not None
+    click(find(desc='Hide keyboard'));click(find(rid='runtime_settings'))
+    screenshot('54-runtime-english');click(find(rid='runtime_disconnect'))
+    assert find(text='Disconnect?') is not None
+    click(find(rid='disconnect_confirm'))
+    assert find(text='Remote control') is not None
+    record('live language switch translates settings, keyboard and confirmation without replacing the video session')
+    top();click(find(rid='language_picker'));click(find(desc='简体中文'))
 
 
 def verify_top_buffer():
@@ -720,10 +923,10 @@ def verify_configs():
         raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
         values=ET.fromstring(raw)
         return json.loads(next((n.text for n in values if n.get('name')=='profiles'),'[]'))
-    def switches(navigation, watching, awake, audio=True, mic=False):
+    def switches(navigation, watching, awake, audio=True, mic=False, rotation=True):
         bottom()
         if find(text='仅观看').get('checked')=='true':tap('仅观看')
-        for text,value in [('展示虚拟按键',navigation),('播放远端声音',audio),('转发本机麦克风',mic),('仅观看',watching),('充电时保持远端唤醒',awake)]:
+        for text,value in [('展示虚拟按键',navigation),('播放远端声音',audio),('转发本机麦克风',mic),('仅观看',watching),('同步远端屏幕方向',rotation),('充电时保持远端唤醒',awake)]:
             if find(text=text).get('checked')!=str(value).lower():tap(text)
     def save(name=None, suggested=None):
         top();tap('保存配置')
@@ -750,7 +953,7 @@ def verify_configs():
             node=next((n for n in nodes if n.get('content-desc')==desc),None)
             assert node is not None and node.get('text')==str(profile[key]), (desc,node.attrib if node is not None else None)
         assert any(n.get('text')==('H.265' if profile['codec']=='h265' else 'H.264') for n in nodes)
-        for text,key in [('展示虚拟按键','showNavigation'),('仅观看','viewOnly'),('播放远端声音','forwardAudio'),('转发本机麦克风','forwardMic'),('充电时保持远端唤醒','stayAwake')]:
+        for text,key in [('展示虚拟按键','showNavigation'),('仅观看','viewOnly'),('播放远端声音','forwardAudio'),('转发本机麦克风','forwardMic'),('同步远端屏幕方向','syncRotation'),('充电时保持远端唤醒','stayAwake')]:
             node=next(n for n in nodes if n.get('text')==text)
             assert node.get('checked')==str(profile.get(key,key not in ['viewOnly','forwardMic'])).lower(), key
     def remove(name, confirm=True):
@@ -766,11 +969,11 @@ def verify_configs():
         record('existing saved connection restores after upgrading from previous APK')
     top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));tap('省流')
     edit('最长边 · px','1280');switches(True,False,True);save(name_a)
-    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True,forwardAudio=True,forwardMic=False)
+    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True,forwardAudio=True,forwardMic=False,syncRotation=True)
     top();edit('设备 IP / 主机名','second-device.example');edit('ADB 端口','5566');tap('高清')
     edit('最长边 · px','1920');edit('帧率上限 · FPS','45');click(find(desc='视频编码'));tap('H.265')
-    switches(False,True,False,audio=False,mic=True);save(name_b,'second-device.example:5566')
-    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False,forwardAudio=False,forwardMic=True)
+    switches(False,True,False,audio=False,mic=True,rotation=False);save(name_b,'second-device.example:5566')
+    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False,forwardAudio=False,forwardMic=True,syncRotation=False)
     root=picker()
     assert find(desc=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
     assert find(desc=name_b+'\nsecond-device.example:5566',root=root) is not None
@@ -865,22 +1068,22 @@ def verify_appearance():
     assert icon is not None, 'Launcher app entry missing'
     screenshot('24-launcher-icon');click(icon);bottom()
     top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));connect()
-    root=wait_connected();exit=find(desc='断开连接',root=root);keyboard=find(desc='虚拟键盘',root=root)
+    root=wait_connected();exit=find(rid='runtime_settings',root=root);keyboard=find(desc='虚拟键盘',root=root)
     assert exit.get('class')==keyboard.get('class')=='android.widget.ImageButton'
     eb,kb=bounds(exit),bounds(keyboard)
     assert eb[1]==kb[1] and eb[3]==kb[3] and eb[2]-eb[0]==kb[2]-kb[0] and kb[2]<eb[0]
     assert find(text='断开',root=root) is None
     screenshot('25-icon-controls')
     shell(a.client,'wm','size','880x1900');time.sleep(.6)
-    root=wait_connected();nav=bounds(find(desc='最近任务',root=root));kb=bounds(find(desc='虚拟键盘',root=root));eb=bounds(find(desc='断开连接',root=root))
+    root=wait_connected();nav=bounds(find(desc='最近任务',root=root));kb=bounds(find(desc='虚拟键盘',root=root));eb=bounds(find(rid='runtime_settings',root=root))
     assert nav[2]<=kb[0] and kb[2]<eb[0] and eb[2]<=880, (nav,kb,eb)
     screenshot('26-compact-icon-controls');shell(a.client,'wm','size','reset');time.sleep(.6)
-    click(find(desc='断开连接'))
+    begin_disconnect()
     assert find(text='断开连接？') is not None
     screenshot('27-disconnect-confirmation');tap('取消');wait_connected()
     assert re.search(r'(^|\s)com\.genymobile\.scrcpy\.Server(\s|$)',shell(a.target,'ps','-A','-o','ARGS'),re.M)
     record('disconnect icon requires confirmation; cancelling keeps the live remote session')
-    click(find(desc='断开连接'));tap('确认断开');bottom()
+    begin_disconnect();tap('确认断开');bottom()
     end=time.monotonic()+8
     while time.monotonic()<end:
         if not re.search(r'(^|\s)com\.genymobile\.scrcpy\.Server(\s|$)',shell(a.target,'ps','-A','-o','ARGS'),re.M):break
@@ -921,7 +1124,7 @@ def verify_dialogs(text_only=False):
         root=wait_connected();window=bounds(root.find('node'))
         back=bounds(find(desc='Back',root=root));home=bounds(find(desc='Home',root=root));recents=bounds(find(desc='最近任务',root=root))
         status=next(n for n in root.iter('node') if '已连接' in n.get('text',''))
-        sb=bounds(status);kb=bounds(find(desc='虚拟键盘',root=root));exit=bounds(find(desc='断开连接',root=root))
+        sb=bounds(status);kb=bounds(find(desc='虚拟键盘',root=root));exit=bounds(find(rid='runtime_settings',root=root))
         mid=(window[0]+window[2])/2
         assert abs((home[0]+home[2])/2-mid)<=2, (name,home,window)
         assert abs((back[0]+recents[2])/2-mid)<=2, (name,back,recents,window)
@@ -999,6 +1202,7 @@ try:
     shell(a.client, 'am', 'start', '-n', PKG + '/.MainActivity')
     time.sleep(.5)
     screenshot('01-form')
+    click(find(rid='language_picker'));tap('简体中文')
     edit('设备 IP / 主机名', a.host)
     edit('ADB 端口', str(a.port))
     bottom()
@@ -1007,6 +1211,15 @@ try:
     if a.phase!='audio':
         node=find(text='转发本机麦克风')
         if node is not None and node.get('checked')=='true':click(node)
+    if a.phase == 'runtime':
+        verify_runtime()
+        sys.exit(0)
+    if a.phase == 'language':
+        verify_language()
+        sys.exit(0)
+    if a.phase == 'language-live':
+        verify_live_language()
+        sys.exit(0)
     if a.phase == 'ui':
         verify_ui()
         sys.exit(0)
@@ -1020,6 +1233,9 @@ try:
         sys.exit(0)
     if a.phase == 'configs':
         verify_configs()
+        sys.exit(0)
+    if a.phase == 'audio-runtime':
+        verify_audio(True)
         sys.exit(0)
     if a.phase == 'audio':
         verify_audio()
@@ -1196,12 +1412,16 @@ try:
         raise AssertionError('Remote server still running after disconnect')
     record('disconnect terminates the observed remote server')
 except Exception:
-    screenshot('failure')
-    (a.output / 'client-log.txt').write_text(adb(a.client, 'logcat', '-d', '-s', 'ScrcpySession', 'ScrcpyServer'))
+    try:
+        screenshot('failure')
+        (a.output / 'client-log.txt').write_text(adb(a.client, 'logcat', '-d', '-s', 'ScrcpySession', 'ScrcpyServer'))
+    except (subprocess.SubprocessError,OSError) as e:
+        print('Failure capture unavailable:',e,flush=True)
     raise
 finally:
-    if a.phase in ['ui','appearance','dialogs','text-dialogs']:
-        shell(a.client, 'wm', 'size', 'reset')
+    if a.phase in ['ui','appearance','dialogs','text-dialogs','language']:
+        try:shell(a.client, 'wm', 'size', 'reset')
+        except (subprocess.SubprocessError,OSError) as e:print('Display cleanup pending:',e,flush=True)
     for (serial,key), value in rotation_settings.items():
         try:
             if value == 'null': shell(serial, 'settings', 'delete', 'system', key)

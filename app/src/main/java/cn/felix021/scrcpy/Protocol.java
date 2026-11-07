@@ -35,7 +35,7 @@ final class Protocol {
 
     static byte[] paste(String text) {
         byte[] utf8 = text.getBytes(StandardCharsets.UTF_8);
-        if (utf8.length > 65536) throw new IllegalArgumentException("每次最多发送 64 KB 文本");
+        if (utf8.length > 65536) throw new IllegalArgumentException("TEXT_TOO_LARGE");
         return ByteBuffer.allocate(14 + utf8.length).put((byte) 9).putLong(0)
                 .put((byte) 1).putInt(utf8.length).put(utf8).array();
     }
