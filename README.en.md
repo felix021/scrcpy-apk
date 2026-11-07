@@ -10,6 +10,10 @@ View and control an Android device from another Android phone over network ADB o
 - Portrait and landscape layouts, remote orientation sync, manual rotation, view-only mode and keep-awake settings.
 - A consistent dark UI, Chinese / English with a system-language option, and app settings with version and repository information.
 
+## Download and install
+
+Download the APK from [GitHub Releases](https://github.com/felix021/scrcpy-apk/releases/latest) to install or upgrade. Each release includes a SHA-256 checksum file. The APK uses a non-debuggable release build and retains the signing certificate used by earlier versions.
+
 ## Quick start
 
 The client requires Android 8.0+. Remote audio playback requires Android 11+ on the remote device; other capabilities depend on the remote OS, codecs and vendor permissions.

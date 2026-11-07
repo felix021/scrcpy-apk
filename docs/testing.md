@@ -47,6 +47,8 @@ adb -s "$SCRCPY_TARGET_SERIAL" forward tcp:15555 tcp:5555
 
 标准 Android Emulator 中，客户端通过 `10.0.2.2` 访问宿主机，再经宿主机 15555 转发到被控 AVD 的 adbd。该地址是模拟器的特殊网关地址；真实手机应填写它实际可访问的目标地址。主机已授权目标 adb 不等于客户端应用已授权，首次仍需在被控端批准应用生成的密钥。
 
+若 AVD 重启后独立 adb server 没有自动发现它，可用 `adb connect '127.0.0.1:<target-adb-port>'` 连接本任务模拟器的本机 ADB 桥接端口，再将 `adb devices` 返回的地址作为 `--target`。桥接端口通常为该 AVD 控制台端口加一，操作前核对分配；无需重启影响其他设备的 adb server。
+
 ## 执行和证据
 
 先构建主应用与探针，再从工作树根目录执行：
@@ -59,6 +61,8 @@ python3 scripts/verify-avd.py \
   --host 10.0.2.2 --port 15555 --phase app-settings \
   --output "$SCRCPY_ARTIFACTS"
 ```
+
+指定其他构建可加 `--apk app/build/outputs/apk/release/app-release.apk`，验证实际交付的 release 包。部分配置专项通过 `run-as` 读取应用私有数据，需要可调试构建；release 包可运行 `app-settings`、`language-live`、`controls`、`audio-runtime` 等不依赖主应用 `run-as` 的阶段。
 
 每次使用新输出目录；它包含 `result.json`、截图以及失败时可用的日志。记录完整命令参数的泛化形式、退出码、通过项和未覆盖边界。`result.json` 中已有通过项不意味着整轮通过：后续仍可能失败，必须看进程退出状态。临时文件和原始日志不提交 Git。
 

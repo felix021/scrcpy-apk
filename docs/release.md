@@ -15,22 +15,22 @@
 3. 构建最终交付 APK，记录对应源码提交、版本与 SHA-256。若验证后还改动应用源码，应重新构建并补做受影响检查。
 
 ```bash
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleRelease :app:testReleaseUnitTest :app:lintRelease
 python3 scripts/check-docs.py
-sha256sum app/build/outputs/apk/debug/app-debug.apk
+sha256sum app/build/outputs/apk/release/app-release.apk
 ```
 
-当前项目使用标准 debug APK 交付，未配置正式 release keystore。不要将 debug 包称为正式商店签名发布。应用包名为 `cn.felix021.scrcpy`，默认输出在 `app/build/outputs/apk/debug/`。
+自 1.0.0 起，GitHub Release 交付非调试的 release 构建，输出为 `app/build/outputs/apk/release/app-release.apk`。为保持覆盖升级，release 构建显式使用与早期 APK 相同的本机 debug keystore；这是签名身份的延续，应用本身不启用调试。未引入独立商店签名，不能将此证书称为应用商店发布密钥。包名保持 `cn.felix021.scrcpy`。
 
 ## 签名与覆盖安装
 
-APK 版本正确不代表能够覆盖旧包，还需要签名证书一致。新构建机器的默认 debug keystore 可能不同；交付前用已安装版本 / 上次交付的 APK 核对证书，不把私钥和 keystore 提交到 Git。
+检查 APK 的 `debuggable` 标志未开启，再核对版本与签名。APK 版本正确不代表能够覆盖旧包，还需要签名证书一致。新构建机器的默认 debug keystore 可能不同；交付前用已安装版本 / 上次交付的 APK 核对证书，不把私钥和 keystore 提交到 Git。
 
 ```bash
 "$ANDROID_HOME/build-tools/<installed-version>/apksigner" verify --print-certs \
-  app/build/outputs/apk/debug/app-debug.apk
+  app/build/outputs/apk/release/app-release.apk
 "$ANDROID_HOME/build-tools/<installed-version>/aapt" dump badging \
-  app/build/outputs/apk/debug/app-debug.apk
+  app/build/outputs/apk/release/app-release.apk
 ```
 
 替换为已安装的 build-tools 版本，检查包名、versionCode、versionName、min SDK 和签名证书 SHA-256。签名冲突时先解决构建环境或密钥来源，不把卸载旧包当作默认步骤，因为卸载会丢失配置和 ADB 身份。
@@ -50,5 +50,6 @@ Gradle wrapper JAR 是构建工具，可保留在 Git；下载的 server、编�
 - `git diff --check`，确认差异只含本任务内容；检查没有被跟踪的 APK、构建目录、临时文件、密钥和本机配置。提交不添加 AI coauthor。
 - 按项目已有分支工作流集成，检查主工作区未提交变更，不覆盖其他任务修改；按已有授权推送。
 - 在部署环境指定的静态目录发布带版本文件名的 APK，避免覆盖已缓存的同名版本。原始构建包和发布包应具有相同 SHA-256。
+- GitHub Release 使用与应用版本对应的 tag，上传可安装的 `scrcpy-apk-<version>.apk` 及 `SHA256SUMS`，发布为正式版并设置 latest；APK 只作为 Release asset，不进入 Git。
 - 从实际下载 URL 重新取回文件，比较哈希；验证链接可访问及文件完整，不能只确认本地拷贝成功。截图另检查隐私后发布，不放入源码仓库。
 - 交付说明包含版本、下载入口、行为变化、验证结果及实际限制；保留原始证据在仓库外，报告使用占位环境信息。

@@ -22,10 +22,14 @@ P.add_argument('--host', required=True, help='target address reachable from AVD'
 P.add_argument('--port', type=int, default=5555)
 P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'usb-ui', 'app-settings', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
+P.add_argument('--apk', type=Path, help='Client APK to install; defaults to the debug build output')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
 ROOT = Path(__file__).resolve().parent.parent
+client_apk = a.apk.resolve() if a.apk else ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
+if not client_apk.is_file():
+    P.error(f'Client APK not found: {client_apk}')
 PKG = 'cn.felix021.scrcpy'
 PROBE = PKG + '.probe'
 results = []
@@ -669,7 +673,7 @@ def verify_audio(live=False):
     source_apk='/data/local/tmp/scrcpy-mic-source-validation.apk'
     capture_apk='/data/local/tmp/scrcpy-audio-validation.apk'
     name='scrcpy_mic_validation_'+str(time.time_ns())
-    adb(a.client,'push',ROOT/'app/build/outputs/apk/debug/app-debug.apk',source_apk)
+    adb(a.client,'push',client_apk,source_apk)
     adb(a.client,'push',ROOT/'validation/probe/build/outputs/apk/debug/probe-debug.apk',capture_apk)
     process=subprocess.Popen(['adb','-s',a.client,'shell','CLASSPATH='+source_apk+' app_process / '+PKG+'.MicServer '+name+' '+source_apk],
                              stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
@@ -760,7 +764,12 @@ def verify_audio(live=False):
         except subprocess.TimeoutExpired:process.terminate()
         shell(a.client,'am','force-stop',PKG)
         shell(a.client,'rm','-f',source_apk,capture_apk)
-        for serial,volume in media_volumes.items():shell(serial,'cmd','media_session','volume','--stream',3,'--set',volume)
+        failed=sys.exc_info()[0] is not None
+        for serial,volume in media_volumes.items():
+            try:shell(serial,'cmd','media_session','volume','--stream',3,'--set',volume)
+            except (subprocess.SubprocessError,OSError) as e:
+                if not failed:raise
+                print('Audio volume cleanup pending:',serial,e,flush=True)
 
 
 def bounds(node):
@@ -1421,7 +1430,7 @@ try:
     shell(a.client,'am','force-stop',PKG)
     shell(a.client,'settings','put','system','accelerometer_rotation',0)
     shell(a.client,'settings','put','system','user_rotation',0)
-    adb(a.client, 'install', '-r', ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
+    adb(a.client, 'install', '-r', client_apk)
     adb(a.target, 'install', '-r', ROOT / 'validation/probe/build/outputs/apk/debug/probe-debug.apk')
     shell(a.target, 'input', 'keyevent', 224)
     shell(a.target, 'wm', 'dismiss-keyguard')

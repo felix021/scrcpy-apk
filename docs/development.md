@@ -48,6 +48,8 @@ sdkmanager "platforms;android-31" "build-tools;30.0.2" "platform-tools"
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
+正式交付使用 `:app:assembleRelease`，签名与输出说明见 [发布指南](release.md)；设备脚本可用 `--apk` 选择 release 包。
+
 需要端到端验证时再构建探针：
 
 ```bash
