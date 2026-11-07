@@ -20,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -298,8 +298,7 @@ def verify_controls():
     def key(desc):
         click(find(desc=desc))
     def rotate(serial, rotation):
-        shell(serial,'settings','put','system','accelerometer_rotation',0)
-        shell(serial,'settings','put','system','user_rotation',rotation)
+        shell(serial,'wm','user-rotation','lock',rotation)
         time.sleep(1)
     def input_logs():
         return adb(a.target,'logcat','-d','-s','ScrcpyInput:I','*:S')
@@ -311,6 +310,21 @@ def verify_controls():
         root=target_tree()
         node=find(desc='验证输入框',root=root)
         assert node is not None and node.get('text')==value, 'Remote text differs: '+str(node.attrib if node is not None else None)
+    def hold(desc):
+        l,t,r,b=bounds(find(desc=desc));shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,(l+r)//2,(t+b)//2,700)
+    def swipe_key(desc,direction):
+        l,t,r,b=bounds(find(desc=desc));x=(l+r)//2;y=(t+b)//2
+        shell(a.client,'input','swipe',x,y,x,y+int((b-t)*.8)*direction,240)
+    def keyboard_layout():
+        root=dump();keyboard=find(desc='完整虚拟键盘',root=root)
+        rows=[node for node in keyboard if node.get('class')=='android.widget.LinearLayout']
+        assert len(rows)==6,[(n.get('class'),n.get('bounds')) for n in keyboard]
+        control=bounds(find(desc='Ctrl',root=root));letter=bounds(find(desc='字符 q',root=root))
+        assert control[3]-control[1]<letter[3]-letter[1] and control[2]-control[0]>letter[2]-letter[0]
+        assert bounds(find(desc='Backspace',root=root))[1]==bounds(find(desc='字符 z',root=root))[1]
+        assert bounds(find(desc='Enter',root=root))[1]==bounds(find(desc='Space',root=root))[1]
+        assert find(desc='字符 1',root=root) is None
+        return root
     def wait_video_shape(landscape):
         end=time.monotonic()+15
         while time.monotonic()<end:
@@ -387,20 +401,39 @@ def verify_controls():
         shell(a.target,'cmd','statusbar','collapse')
         shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
         key('虚拟键盘')
+        keyboard_layout();screenshot('15-six-row-layout')
+        if a.phase=='keyboard-layout':
+            swipe_key('字符 q',-1);swipe_key('字符 q',1);key('Enter');key('Space');expect_text('1Q\n ')
+            screenshot('15-keyboard-portrait')
+            rotate(a.client,1);wait_connected();keyboard_layout()
+            swipe_key('字符 a',-1);swipe_key('字符 b',1);expect_text('1Q\n -B')
+            root=dump();video=bounds(find(desc='远控屏幕',root=root));keyboard=bounds(find(desc='完整虚拟键盘',root=root))
+            assert video[2]<=keyboard[0]
+            screenshot('16-keyboard-landscape');key('收起键盘');tap('断开')
+            record('six-row QWERTY in portrait and landscape; hinted swipe characters, capitals, bottom Enter and Space reach the remote input field')
+            return
         for char in 'hello': key('字符 '+char)
         key('Shift');key('字符 A')
-        key('Caps Lock');key('字符 B');key('Shift');key('字符 c');key('Caps Lock')
+        hold('Shift');key('字符 B');key('Shift');key('字符 c')
         expect_text('helloABc')
         key('Ctrl');key('字符 a');key('字符 b');expect_text('b')
-        record('full keyboard, Shift, Caps+Shift and one-shot Ctrl+A edit remote text')
+        record('six rows, flatter/wider control keys, third-row Backspace and bottom-row Enter; Shift lock and one-shot Ctrl+A edit remote text')
+        swipe_key('字符 q',-1);swipe_key('字符 q',1);swipe_key('字符 a',-1);swipe_key('字符 z',-1);swipe_key('字符 .',-1)
+        expect_text('b1Q-@,')
+        hold('Shift');swipe_key('字符 Q',-1);expect_text('b1Q-@,1');key('Shift')
+        l,t,r,b=bounds(find(desc='字符 q'))
+        shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,r+(r-l),(t+b)//2,240)
+        expect_text('b1Q-@,1')
+        key('Ctrl');key('字符 a');key('字符 b');expect_text('b')
+        record('QWERTY swipe up sends hinted numbers/symbols, swipe down sends capitals; locked Shift preserves exact swipe values and horizontal drags type nothing')
         l,t,r,b=bounds(find(desc='Ctrl'))
         shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,(l+r)//2,(t+b)//2,700)
         key('字符 a');key('字符 c')
         assert find(desc='Ctrl').get('selected')=='true', 'Locked Ctrl lost its state'
         key('Ctrl');key('字符 b');expect_text('b')
         record('long press locks Ctrl across multiple keys and tap unlocks it')
-        key('Shift');key('字符 <');expect_text('b<')
-        key('切换符号');key('Shift');key('字符 {');expect_text('b<{')
+        key('切换符号');key('字符 <');expect_text('b<')
+        key('Shift');key('字符 {');expect_text('b<{')
         key('切换符号')
         key('Fn');key('F1');key('Fn');key('F11');key('Home 键')
         remote_logs=input_logs()
@@ -426,6 +459,7 @@ def verify_controls():
         time.sleep(.3);expect_text(short)
         record('held Backspace repeats and stops when released')
         rotate(a.client,1)
+        keyboard_layout()
         root=wait_connected();v=bounds(find(desc='远控屏幕',root=root));k=bounds(find(desc='完整虚拟键盘',root=root))
         assert v[2]<=k[0] and v[2]>v[0] and k[3]>k[1], (v,k)
         key('Ctrl');key('字符 a');key('字符 x');expect_text('x')
@@ -1249,7 +1283,7 @@ try:
     if a.phase == 'insets':
         tap('省流');verify_top_buffer()
         sys.exit(0)
-    if a.phase in ['controls','keyboard']:
+    if a.phase in ['controls','keyboard','keyboard-layout']:
         verify_controls()
         sys.exit(0)
     if a.phase == 'all':

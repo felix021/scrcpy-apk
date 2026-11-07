@@ -2,11 +2,14 @@ package cn.felix021.scrcpy;
 
 import android.content.Context;
 import android.graphics.Typeface;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.LinearLayout;
 
@@ -42,14 +45,18 @@ final class RemoteKeyboard extends LinearLayout {
     @Override protected void onDetachedFromWindow() {
         repeats.removeCallbacksAndMessages(null); state.clear(); super.onDetachedFromWindow();
     }
-    private LinearLayout row() {
+    private LinearLayout row(boolean control) {
         LinearLayout row = new LinearLayout(getContext()); row.setGravity(Gravity.CENTER_VERTICAL);
-        LayoutParams lp = new LayoutParams(-1, fillHeight ? 0 : dp(38), fillHeight ? 1 : 0);
+        LayoutParams lp = new LayoutParams(-1, fillHeight ? 0 : dp(control?32:42), fillHeight ? (control?.76f:1) : 0);
         addView(row, lp); return row;
     }
     private Button button(LinearLayout row, String label, String description, float weight, Runnable action) {
-        Button b = new Button(getContext()); b.setText(label); b.setAllCaps(false); b.setTextSize(description.equals("Left") || description.equals("Down") || description.equals("Up") || description.equals("Right") ? 18 : 12);
+        return button(row,new Button(getContext()),label,description,weight,action);
+    }
+    private Button button(LinearLayout row,Button b,String label,String description,float weight,Runnable action) {
+        b.setText(label); b.setAllCaps(false); b.setTextSize(description.equals("Left") || description.equals("Down") || description.equals("Up") || description.equals("Right") ? 18 : 12);
         b.setTypeface(Typeface.MONOSPACE); b.setTextColor(text); b.setContentDescription(description);
+        if(description.equals("Enter")){b.setTextSize(24);b.setTypeface(Typeface.DEFAULT);}
         b.setTooltipText(description); b.setMinWidth(0); b.setMinimumWidth(0); b.setMinHeight(0); b.setMinimumHeight(0);
         b.setPadding(0,0,0,0); b.setStateListAnimator(null); b.setBackground(bg(0xff253541));
         LayoutParams lp = new LayoutParams(0,-1,weight); lp.setMargins(dp(2),dp(2),dp(2),dp(2)); row.addView(b,lp);
@@ -86,16 +93,49 @@ final class RemoteKeyboard extends LinearLayout {
         char shown = Character.isLetter(c) && state.upper() ? Character.toUpperCase(c) : c;
         if (!Character.isLetter(c) && state.shift > 0) shown = KeyboardState.shifted(c);
         final char value = shown;
-        int extra = (KeyboardState.needsShift(value)) ? 0x41 : 0;
-        // Caps only affects letters, without applying Shift to punctuation/numbers.
-        int code = KeyboardState.code(Character.toLowerCase(value));
-        key(row,String.valueOf(value),UiText.text(R.string.character) + value,code,extra,1,false);
+        char alternate=KeyboardState.alternate(c);
+        Button b=button(row,new CharacterButton(alternate),String.valueOf(value),UiText.text(R.string.character)+value,1,() -> emitCharacter(value));
+        b.setTextSize(16);b.setPadding(0,alternate==0?0:dp(8),0,0);
+        b.setTooltipText(b.getContentDescription()+(alternate==0?"":" · ↑ "+alternate)+(Character.isLetter(c)?" · ↓ "+Character.toUpperCase(c):""));
+        final float[] start=new float[2];final boolean[] moved={false};
+        int slop=ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        b.setOnTouchListener((v,event) -> {
+            int action=event.getActionMasked();
+            if(action==MotionEvent.ACTION_DOWN){start[0]=event.getX();start[1]=event.getY();moved[0]=false;getParent().requestDisallowInterceptTouchEvent(true);}
+            float dx=event.getX()-start[0],dy=event.getY()-start[1];
+            if(action==MotionEvent.ACTION_MOVE && !moved[0] && Math.hypot(dx,dy)>slop){
+                moved[0]=true;MotionEvent cancel=MotionEvent.obtain(event);cancel.setAction(MotionEvent.ACTION_CANCEL);b.onTouchEvent(cancel);cancel.recycle();
+            }
+            if(action==MotionEvent.ACTION_UP && moved[0]){
+                if(Math.abs(dy)>=dp(12) && Math.abs(dy)>Math.abs(dx)*1.25f){
+                    if(dy<0 && alternate!=0)emitCharacter(alternate);
+                    else if(dy>0 && Character.isLetter(c))emitCharacter(Character.toUpperCase(c));
+                }
+            }
+            return moved[0];
+        });
+    }
+    private void emitCharacter(char value){
+        // A swipe names an exact character, even if Shift is currently locked.
+        int meta=state.meta() & ~(0x41|0x100000);
+        if(Character.isUpperCase(value) || KeyboardState.needsShift(value))meta|=0x41;
+        listener.key(KeyboardState.code(Character.toLowerCase(value)),meta);state.consume();render();
+    }
+    private final class CharacterButton extends Button {
+        private final char alternate;
+        private final Paint hint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        CharacterButton(char alternate){super(RemoteKeyboard.this.getContext());this.alternate=alternate;}
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            if(alternate!=0){hint.setColor(0xff9aafbc);hint.setTextAlign(Paint.Align.CENTER);hint.setTypeface(Typeface.MONOSPACE);
+                hint.setTextSize(8*getResources().getDisplayMetrics().scaledDensity);canvas.drawText(String.valueOf(alternate),getWidth()/2f,dp(10),hint);}
+        }
     }
     private void render() {
         repeats.removeCallbacksAndMessages(null); removeAllViews();
         // oh-my-term's two control rows: keep the navigation cross and paired
         // Home/End, PgUp/PgDn in fixed columns, independent of the Fn layer.
-        LinearLayout firstControls = row(), secondControls = row();
+        LinearLayout firstControls = row(true), secondControls = row(true);
         key(firstControls,state.fn>0 ? "Menu" : "Esc",state.fn>0 ? UiText.text(R.string.menu_key) : "Escape",state.fn>0 ? 82 : 111,0,1,true);
         ctrlButton = button(firstControls,"Ctrl","Ctrl",1,() -> { state.ctrl=KeyboardState.toggle(state.ctrl); render(); });
         ctrlButton.setOnLongClickListener(v -> { state.ctrl=KeyboardState.lock(state.ctrl); render(); return true; }); modifierAppearance(ctrlButton,state.ctrl);
@@ -116,33 +156,28 @@ final class RemoteKeyboard extends LinearLayout {
         if (state.fn > 0) key(secondControls,"F12","F12",142,0,1,false);
         else button(secondControls,UiText.text(R.string.paste),UiText.text(R.string.paste),1,() -> { reset();listener.paste(); });
         button(secondControls,UiText.text(R.string.hide),UiText.text(R.string.hide_keyboard),1,listener::close);
-        LinearLayout numbers = row();
-        String digits = "1234567890";
-        for (int i=0;i<digits.length();i++) {
-            if (state.fn > 0) key(numbers,"F"+(i+1),"F"+(i+1),131+i,0,1,false);
-            else character(numbers,digits.charAt(i));
+        LinearLayout first = row(false), second = row(false), third = row(false);
+        if(!state.symbols)second.setPadding(dp(16),0,dp(16),0);
+        String firstKeys=state.symbols?"1234567890":"qwertyuiop";
+        for(int i=0;i<firstKeys.length();i++){
+            if(state.fn>0)key(first,"F"+(i+1),"F"+(i+1),131+i,0,1,false);
+            else character(first,firstKeys.charAt(i));
         }
-        key(numbers,"⌫","Backspace",67,0,1.35f,true);
-        LinearLayout first = row(), second = row(), third = row();
         if (state.symbols) {
-            for (char c : "`~!@#$%^&*".toCharArray()) character(first,c);
-            for (char c : "()[]{}<>/\\".toCharArray()) character(second,c);
-            for (char c : "+=-_:;'\"|?".toCharArray()) character(third,c);
-            key(second,"Enter","Enter",66,0,1.3f,false);
+            for (char c : "`-=[]\\;',/".toCharArray()) character(second,c);
         } else {
-            for (char c : "qwertyuiop".toCharArray()) character(first,c);
             for (char c : "asdfghjkl".toCharArray()) character(second,c);
-            key(second,"Enter","Enter",66,0,1.3f,false);
-            for (char c : "zxcvbnm,./".toCharArray()) character(third,c);
         }
-        LinearLayout bottom = row();
-        button(bottom,state.symbols ? "ABC" : "#+=",UiText.text(R.string.switch_symbols),1.4f,() -> { state.symbols=!state.symbols; render(); });
-        Button caps = button(bottom,"Caps","Caps Lock",1.4f,() -> { state.caps=!state.caps; render(); });
-        modifierAppearance(caps,state.caps ? 2 : 0);
-        shiftButton = button(bottom,"Shift","Shift",1.4f,() -> { state.shift=KeyboardState.toggle(state.shift); render(); });
+        shiftButton = button(third,"Shift","Shift",1.5f,() -> { state.shift=KeyboardState.toggle(state.shift); render(); });
         shiftButton.setOnLongClickListener(v -> { state.shift=KeyboardState.lock(state.shift); render(); return true; }); modifierAppearance(shiftButton,state.shift);
-        key(bottom,UiText.text(R.string.space),"Space",62,0,4,false);
-        fnButton = button(bottom,"Fn","Fn",1.4f,() -> { state.fn=KeyboardState.toggle(state.fn); render(); });
+        for(char c:(state.symbols?"\"<>|_+?":"zxcvbnm").toCharArray())character(third,c);
+        key(third,"⌫","Backspace",67,0,1.5f,true);
+        LinearLayout bottom = row(false);
+        button(bottom,state.symbols ? "ABC" : "123",UiText.text(R.string.switch_symbols),1.5f,() -> { state.symbols=!state.symbols; render(); });
+        character(bottom,'.');
+        key(bottom,UiText.text(R.string.space),"Space",62,0,5,false);
+        fnButton = button(bottom,"Fn","Fn",1,() -> { state.fn=KeyboardState.toggle(state.fn); render(); });
         fnButton.setOnLongClickListener(v -> { state.fn=KeyboardState.lock(state.fn); render(); return true; }); modifierAppearance(fnButton,state.fn);
+        key(bottom,"↵","Enter",66,0,1.5f,true);
     }
 }

@@ -2,6 +2,17 @@ package cn.felix021.scrcpy;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class KeyboardStateTest {
+    @Test public void qwertySwipeAlternatesMatchKeyHints() {
+        String keys="qwertyuiopasdfghjklzxcvbnm.";
+        String expected="1234567890-/:;()~'\"@_#&?!.,";
+        for(int i=0;i<keys.length();i++){
+            char value=KeyboardState.alternate(keys.charAt(i));
+            assertEquals(expected.charAt(i),value);
+            assertEquals(value,KeyboardState.alternate(Character.toUpperCase(keys.charAt(i))));
+            assertTrue(KeyboardState.code(value)>0);
+        }
+        assertEquals(0,KeyboardState.alternate('['));
+    }
     @Test public void oneShotClearsButLockedModifiersPersist() {
         KeyboardState s=new KeyboardState();s.ctrl=1;s.alt=2;s.shift=1;s.fn=1;s.caps=true;
         assertEquals(0x103053,s.meta());s.consume();

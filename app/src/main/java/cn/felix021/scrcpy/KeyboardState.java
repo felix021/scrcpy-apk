@@ -14,6 +14,13 @@ final class KeyboardState {
     static int lock(int state) { return state == 2 ? 0 : 2; }
     boolean upper() { return caps ^ (shift > 0); }
 
+    static char alternate(char c) {
+        String keys="qwertyuiopasdfghjklzxcvbnm.";
+        String values="1234567890-/:;()~'\"@_#&?!.,";
+        int index=keys.indexOf(Character.toLowerCase(c));
+        return index<0?0:values.charAt(index);
+    }
+
     static int code(char c) {
         if (c >= 'a' && c <= 'z') return 29 + c - 'a';
         if (c >= '0' && c <= '9') return 7 + c - '0';
