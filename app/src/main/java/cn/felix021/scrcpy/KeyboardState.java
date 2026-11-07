@@ -2,14 +2,15 @@ package cn.felix021.scrcpy;
 
 final class KeyboardState {
     // 0 off, 1 one-shot, 2 locked. Fn is a local layer, never a remote modifier.
-    int ctrl, alt, shift, fn;
+    int ctrl, alt, shift, win, fn;
     boolean caps, symbols;
-    int meta() { return (ctrl > 0 ? 0x3000 : 0) | (alt > 0 ? 0x12 : 0) | (shift > 0 ? 0x41 : 0) | (caps ? 0x100000 : 0); }
+    int meta() { return (ctrl > 0 ? 0x3000 : 0) | (alt > 0 ? 0x12 : 0) | (shift > 0 ? 0x41 : 0) | (win > 0 ? 0x30000 : 0) | (caps ? 0x100000 : 0); }
     void consume() {
         if (ctrl == 1) ctrl = 0; if (alt == 1) alt = 0;
         if (shift == 1) shift = 0; if (fn == 1) fn = 0;
+        if (win == 1) win = 0;
     }
-    void clear() { ctrl = alt = shift = fn = 0; caps = symbols = false; }
+    void clear() { ctrl = alt = shift = win = fn = 0; caps = symbols = false; }
     static int toggle(int state) { return state == 0 ? 1 : 0; }
     static int lock(int state) { return state == 2 ? 0 : 2; }
     boolean upper() { return caps ^ (shift > 0); }

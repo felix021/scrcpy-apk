@@ -1,4 +1,6 @@
 <resources>
+    <item name="rotate_left" type="id"/>
+    <item name="rotate_right" type="id"/>
     <item name="language_picker" type="id"/>
     <item name="quality_picker" type="id"/>
     <item name="runtime_settings" type="id"/>

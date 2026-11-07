@@ -1,4 +1,7 @@
 <resources>
+    <string name="rotate_left">Rotate left</string>
+    <string name="rotate_right">Rotate right</string>
+    <string name="manual_rotation_hint">"Rotate the remote screen by 90°. It stays this way until you rotate again or turn this phone with orientation sync on."</string>
     <string name="remote_control">"Remote control"</string>
     <string name="connection_profile">"Connection profile"</string>
     <string name="profile">"Profile · "</string>

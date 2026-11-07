@@ -5,6 +5,15 @@ import java.nio.ByteBuffer;
 import static org.junit.Assert.*;
 
 public class ProtocolTest {
+    @Test public void windowsChordPressesAndReleasesActualMetaKey() {
+        ByteBuffer b=ByteBuffer.wrap(Protocol.chord(38,0x33000));
+        int[] actions={0,0,0,1,1,1},codes={113,117,38,38,117,113},metas={0x3000,0x33000,0x33000,0x33000,0x3000,0};
+        assertEquals(84,b.remaining());
+        for(int i=0;i<codes.length;i++) {
+            assertEquals(0,b.get());assertEquals(actions[i],b.get());assertEquals(codes[i],b.getInt());
+            assertEquals(0,b.getInt());assertEquals(metas[i],b.getInt());
+        }
+    }
     @Test public void keyMatchesScrcpyWireFormat() {
         assertArrayEquals(new byte[]{0,0,0,0,0,82,0,0,0,0,0,0,0,0}, Protocol.key(0,82));
         byte[] up = Protocol.key(1,4); assertEquals(14,up.length); assertEquals(1,up[1]); assertEquals(4,up[5]);

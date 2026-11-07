@@ -20,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'keyboard-layout', 'manual-rotation', 'manual-rotation-controls', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio', 'runtime', 'language', 'language-live', 'audio-runtime'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -409,7 +409,7 @@ def verify_controls():
             swipe_key('字符 a',-1);swipe_key('字符 b',1);expect_text('1Q\n -B')
             root=dump();video=bounds(find(desc='远控屏幕',root=root));keyboard=bounds(find(desc='完整虚拟键盘',root=root))
             assert video[2]<=keyboard[0]
-            screenshot('16-keyboard-landscape');key('收起键盘');tap('断开')
+            screenshot('16-keyboard-landscape');key('虚拟键盘');tap('断开')
             record('six-row QWERTY in portrait and landscape; hinted swipe characters, capitals, bottom Enter and Space reach the remote input field')
             return
         for char in 'hello': key('字符 '+char)
@@ -465,7 +465,7 @@ def verify_controls():
         key('Ctrl');key('字符 a');key('字符 x');expect_text('x')
         screenshot('16-keyboard-landscape')
         record('landscape keyboard sits beside video and remains usable without reconnecting')
-        key('收起键盘');rotate(a.target,1);wait_video_shape(True)
+        key('虚拟键盘');rotate(a.target,1);wait_video_shape(True)
         root=wait_connected();v=bounds(find(desc='远控屏幕',root=root))
         assert v[2]-v[0]>v[3]-v[1]
         screenshot('17-both-landscape')
@@ -555,11 +555,11 @@ def verify_landscape():
         keyboard=bounds(find(desc='完整虚拟键盘',root=root));video=bounds(find(desc='远控屏幕',root=root))
         assert video[2]<=keyboard[0]
         first=[bounds(find(desc=d,root=root)) for d in ['Escape','Ctrl','Home 键','Up','End','PgUp','输入文字','Delete']]
-        second=[bounds(find(desc=d,root=root)) for d in ['Tab','Alt','Left','Down','Right','PgDn','粘贴','收起键盘']]
+        second=[bounds(find(desc=d,root=root)) for d in ['Tab','Alt','Left','Down','Right','PgDn','粘贴','Win']]
         assert len({n[1] for n in first})==len({n[1] for n in second})==1
         assert first[0][3]<=second[0][1]
         screenshot('33-landscape-two-control-rows')
-        click(find(desc='收起键盘'));begin_disconnect();tap('取消');wait_connected()
+        click(find(desc='虚拟键盘'));begin_disconnect();tap('取消');wait_connected()
         record('two control rows retain their navigation cross in landscape; disconnect cancel keeps session')
         rotate(0);shape(False);tap('断开');bottom();tap('仅观看');connect()
         rotate(1);time.sleep(1)
@@ -787,6 +787,78 @@ def core_pid():
     return found[0]
 
 
+def verify_manual_rotation(controls_only=False):
+    def expect(auto,rotation):
+        deadline=time.monotonic()+12
+        while time.monotonic()<deadline:
+            actual=tuple(shell(a.target,'settings','get','system',key).strip() for key in ['accelerometer_rotation','user_rotation'])
+            viewports=re.findall(r'Viewport.*displayId=0,.*orientation=([0-3]),',shell(a.target,'dumpsys','input'))
+            if actual==(str(auto),str(rotation)) and viewports and all(int(n)==rotation for n in viewports):return
+            time.sleep(.2)
+        raise AssertionError(('Remote rotation differs',actual,viewports,(auto,rotation)))
+    def turn(right):
+        runtime_open();root=dump();node=find(rid='rotate_right' if right else 'rotate_left',root=root)
+        if node is None:
+            l,t,r,b=bounds(find(rid='runtime_scroll',root=root));shell(a.client,'input','swipe',(l+r)//2,t+20,(l+r)//2,b-20,250)
+            node=find(rid='rotate_right' if right else 'rotate_left')
+        click(node)
+    shell(a.client,'wm','user-rotation','lock',0)
+    shell(a.target,'wm','user-rotation','lock',0);shell(a.target,'wm','user-rotation','free')
+    bottom()
+    for text,value in [('同步远端屏幕方向',True),('播放远端声音',False),('转发本机麦克风',False)]:
+        node=find(text=text)
+        if node.get('checked')!=str(value).lower():click(node)
+    tap('省流');connect();pid=core_pid();expect(0,0)
+    if not controls_only:
+        shell(a.target,'am','start','-W','-n',PROBE+'/.ProbeActivity','--ez','bright','true')
+        runtime_open();turn(True);expect(0,1)
+        assert shell(a.client,'settings','get','system','user_rotation').strip()=='0'
+        screenshot('60-portrait-remote-landscape-popup')
+        turn(False);expect(0,0)
+        node=find(rid='rotate_left');l,t,r,b=bounds(node)
+        for _ in range(3):shell(a.client,'input','tap',(l+r)//2,(t+b)//2)
+        expect(0,1)
+        for rotation in [2,3,0]:turn(True);expect(0,rotation)
+        assert core_pid()==pid
+        record('gear popup turns the actual remote display left/right by 90 degrees, including rapid repeated clicks and all four angles, while client stays portrait and video process is retained')
+        runtime_option('syncRotation',False);expect(1,0);turn(True);expect(0,1)
+        shell(a.client,'wm','user-rotation','lock',1);time.sleep(.6);expect(0,1)
+        shell(a.client,'wm','user-rotation','lock',0);time.sleep(.6);expect(0,1)
+        runtime_option('syncRotation',True);expect(0,0)
+        turn(False);expect(0,3);runtime_close()
+        root=dump();l,t,r,b=bounds(find(desc='远控屏幕',root=root));assert r-l>b-t
+        record('manual rotation persists with sync off; enabling sync resumes local orientation and cached orientation cannot overwrite or ignore manual requests')
+    def input_activity():
+        shell(a.target,'am','start','-W','-n',PROBE+'/.InputActivity')
+    def expect_home():
+        deadline=time.monotonic()+8
+        while time.monotonic()<deadline:
+            if 'launcher' in next(line for line in resumed().splitlines() if 'topResumedActivity=' in line).lower():return
+            time.sleep(.2)
+        raise AssertionError('Win+H did not reach remote Home')
+    input_activity();click(find(desc='虚拟键盘'))
+    assert find(desc='收起键盘') is None and find(desc='Win') is not None
+    click(find(desc='Win'));click(find(desc='字符 h'));expect_home()
+    assert find(desc='Win').get('selected')=='false'
+    input_activity();adb(a.target,'logcat','-c');click(find(desc='字符 j'))
+    remote=adb(a.target,'logcat','-d','-s','ScrcpyInput:I','*:S')
+    assert 'KEY 38 META 0' in remote,remote
+    l,t,r,b=bounds(find(desc='Win'));shell(a.client,'input','swipe',(l+r)//2,(t+b)//2,(l+r)//2,(t+b)//2,700)
+    click(find(desc='字符 h'));expect_home();input_activity();click(find(desc='字符 h'));expect_home()
+    assert find(desc='Win').get('selected')=='true'
+    screenshot('61-keyboard-win');click(find(desc='虚拟键盘'));click(find(desc='虚拟键盘'))
+    assert find(desc='Win').get('selected')=='false'
+    input_activity();adb(a.target,'logcat','-c');click(find(desc='字符 h'))
+    assert 'KEY 36 META 0' in adb(a.target,'logcat','-d','-s','ScrcpyInput:I','*:S')
+    click(find(desc='虚拟键盘'));tap('断开');expect(1,0)
+    record('Win+H actually opens remote Home, one-shot and locked modifiers work, and bottom keyboard toggle clears Win so ordinary typing has zero Meta state')
+    bottom();tap('仅观看');connect();runtime_open()
+    assert find(rid='rotate_left').get('enabled')==find(rid='rotate_right').get('enabled')=='false'
+    expect(1,0);runtime_close();tap('断开');bottom();tap('仅观看')
+    connect();turn(True);expect(0,1);shell(a.client,'am','force-stop',PKG);expect(1,0)
+    record('view-only disables manual rotation; disconnect and force-stop both restore original remote rotation and automatic rotation')
+
+
 def verify_runtime():
     global old_awake
     old_awake=shell(a.target,'settings','get','global','stay_on_while_plugged_in').strip()
@@ -901,7 +973,7 @@ def verify_live_language():
     assert find(text='Remote settings') is not None and core_pid()==pid
     click(find(rid='runtime_done'));click(find(desc='Virtual keyboard'))
     assert find(desc='Full virtual keyboard') is not None and find(desc='Paste') is not None
-    click(find(desc='Hide keyboard'));click(find(rid='runtime_settings'))
+    click(find(desc='Virtual keyboard'));click(find(rid='runtime_settings'))
     screenshot('54-runtime-english');click(find(rid='runtime_disconnect'))
     assert find(text='Disconnect?') is not None
     click(find(rid='disconnect_confirm'))
@@ -1184,7 +1256,7 @@ def verify_dialogs(text_only=False):
         dock('portrait')
         shell(a.client,'wm','size','880x1900');time.sleep(.7);dock('compact')
         shell(a.client,'wm','size','reset');time.sleep(.7);rotate(1);dock('landscape')
-        click(find(desc='虚拟键盘'));dock('landscape-keyboard');click(find(desc='收起键盘'));rotate(0)
+        click(find(desc='虚拟键盘'));dock('landscape-keyboard');click(find(desc='虚拟键盘'));rotate(0)
         record('codec options match theme; three navigation keys stay on window centerline with wrapping status in portrait, 320 dp width, landscape cutout, and keyboard layout')
     else:
         tap('省流');connect()
@@ -1245,6 +1317,9 @@ try:
     if a.phase!='audio':
         node=find(text='转发本机麦克风')
         if node is not None and node.get('checked')=='true':click(node)
+    if a.phase in ['manual-rotation','manual-rotation-controls']:
+        verify_manual_rotation(a.phase=='manual-rotation-controls')
+        sys.exit(0)
     if a.phase == 'runtime':
         verify_runtime()
         sys.exit(0)
@@ -1321,7 +1396,7 @@ try:
         shell(a.client, 'input', 'tap', 540, 1120)
         assert_log('TOUCH 1')
         record('remote touch injection')
-        click(find(desc='虚拟键盘')); click(find(desc='Fn')); click(find(desc='菜单键')); click(find(desc='收起键盘'))
+        click(find(desc='虚拟键盘')); click(find(desc='Fn')); click(find(desc='菜单键')); click(find(desc='虚拟键盘'))
         assert_log('MENU 82')
         screenshot('03-menu')
         record('Menu virtual key reaches remote as KEYCODE_MENU 82')

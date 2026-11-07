@@ -13,9 +13,9 @@ final class Protocol {
 
     /** An indivisible control-queue item, including modifier release in reverse order. */
     static byte[] chord(int keycode, int metaState) {
-        int[] codes = {113, 57, 59}, masks = {0x3000, 0x12, 0x41};
+        int[] codes = {113, 57, 59, 117}, masks = {0x3000, 0x12, 0x41, 0x30000};
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        int active = metaState & ~0x3053;
+        int active = metaState & ~0x33053;
         for (int i = 0; i < codes.length; i++) {
             if ((metaState & masks[i]) != 0) {
                 active |= masks[i];

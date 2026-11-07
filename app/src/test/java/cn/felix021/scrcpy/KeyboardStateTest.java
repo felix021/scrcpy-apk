@@ -2,6 +2,12 @@ package cn.felix021.scrcpy;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class KeyboardStateTest {
+    @Test public void windowsModifierSupportsOneShotLockAndReset() {
+        KeyboardState s=new KeyboardState();s.win=1;s.ctrl=1;
+        assertEquals(0x33000,s.meta());s.consume();assertEquals(0,s.meta());
+        s.win=2;s.shift=1;assertEquals(0x30041,s.meta());s.consume();
+        assertEquals(0x30000,s.meta());s.clear();assertEquals(0,s.meta());
+    }
     @Test public void qwertySwipeAlternatesMatchKeyHints() {
         String keys="qwertyuiopasdfghjklzxcvbnm.";
         String expected="1234567890-/:;()~'\"@_#&?!.,";

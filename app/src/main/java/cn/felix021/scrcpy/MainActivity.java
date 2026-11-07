@@ -309,6 +309,14 @@ public final class MainActivity extends Activity {
     private void showRuntimeSettings(){
         if(!mirroring || settingsDialog!=null)return;
         remoteInput.cancel();LinearLayout body=configPanel(UiText.text(R.string.remote_settings),UiText.text(R.string.changes_take_effect_immediately_and_are_remembered_for_this_conn));
+        LinearLayout rotations=row();
+        Button left=button(UiText.text(R.string.rotate_left),false),right=button(UiText.text(R.string.rotate_right),false);
+        left.setId(R.id.rotate_left);right.setId(R.id.rotate_right);
+        equal(rotations,left,false);equal(rotations,right,true);add(body,rotations,42);gap(body,8);
+        for(Button rotation:new Button[]{left,right}){rotation.setHeight(dp(42));rotation.setEnabled(!profile.viewOnly);rotation.setAlpha(profile.viewOnly?.4f:1);}
+        left.setOnClickListener(v -> {if(session!=null)session.rotate(false);});
+        right.setOnClickListener(v -> {if(session!=null)session.rotate(true);});
+        add(body,label(UiText.text(R.string.manual_rotation_hint),11,MUTED),-2);gap(body,10);
         runtimeSwitches.clear();
         runtimeSwitch(body,"showNavigation",UiText.text(R.string.show_navigation_keys),true);
         runtimeSwitch(body,"forwardAudio",UiText.text(R.string.play_remote_audio),true);
@@ -326,9 +334,11 @@ public final class MainActivity extends Activity {
         disconnect.setTextColor(0xffffb6aa);disconnect.setBackground(background(0xff352a31,14));
         disconnect.setId(R.id.runtime_disconnect);done.setId(R.id.runtime_done);
         configAction(actions,disconnect,1.2f,false);configAction(actions,done,1,true);
-        LinearLayout content=editorPanel(body,actions);ScrollView settingScroll=(ScrollView)content.getChildAt(0);
+        LinearLayout content=editorPanel(body,actions);content.setBackground(background(0xc817232d,22));
+        ScrollView settingScroll=(ScrollView)content.getChildAt(0);
         settingScroll.setId(R.id.runtime_scroll);settingScroll.setScrollbarFadingEnabled(false);settingScroll.setVerticalFadingEdgeEnabled(true);settingScroll.setFadingEdgeLength(dp(16));
         Dialog dialog=showConfigDialog(content,dp(610));settingsDialog=dialog;
+        WindowManager.LayoutParams window=dialog.getWindow().getAttributes();window.dimAmount=.08f;dialog.getWindow().setAttributes(window);
         dialog.setOnDismissListener(ignored -> {if(settingsDialog==dialog){settingsDialog=null;runtimeSwitches.clear();}});
         disconnect.setOnClickListener(v -> confirmDisconnect());done.setOnClickListener(v -> dialog.dismiss());updateRuntimeSwitches();
     }

@@ -15,7 +15,7 @@ public final class ProbeActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         text = new TextView(this); text.setTextSize(24); text.setTextColor(0xff80e2c3);
-        text.setGravity(Gravity.CENTER); text.setBackgroundColor(0xff17232d); setContentView(text);
+        text.setGravity(Gravity.CENTER); text.setBackgroundColor(getIntent().getBooleanExtra("bright",false)?0xffd8b463:0xff17232d); setContentView(text);
         show("READY");
     }
     private void show(String event) { text.setText("scrcpy validation\n" + event); Log.i("ScrcpyProbe", event); }

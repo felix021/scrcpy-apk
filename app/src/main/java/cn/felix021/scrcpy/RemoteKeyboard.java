@@ -155,7 +155,8 @@ final class RemoteKeyboard extends LinearLayout {
         key(secondControls,"PgDn","PgDn",93,0,1,true);
         if (state.fn > 0) key(secondControls,"F12","F12",142,0,1,false);
         else button(secondControls,UiText.text(R.string.paste),UiText.text(R.string.paste),1,() -> { reset();listener.paste(); });
-        button(secondControls,UiText.text(R.string.hide),UiText.text(R.string.hide_keyboard),1,listener::close);
+        Button win=button(secondControls,"Win","Win",1,() -> {state.win=KeyboardState.toggle(state.win);render();});
+        win.setOnLongClickListener(v -> {state.win=KeyboardState.lock(state.win);render();return true;});modifierAppearance(win,state.win);
         LinearLayout first = row(false), second = row(false), third = row(false);
         if(!state.symbols)second.setPadding(dp(16),0,dp(16),0);
         String firstKeys=state.symbols?"1234567890":"qwertyuiop";

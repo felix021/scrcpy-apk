@@ -101,7 +101,7 @@ final class ScrcpySession {
             String id = String.format(Locale.ROOT, "%08x", new java.security.SecureRandom().nextInt(0x7fffffff));
             serverPath="/data/local/tmp/scrcpy-apk-"+id+".jar";
             micPath="/data/local/tmp/scrcpy-mic-"+id+".apk";micName="scrcpy_mic_"+id;
-            deviceSettings=new RemoteDeviceSettings(connection,serverPath,micPath,this::fail);
+            deviceSettings=new RemoteDeviceSettings(connection,serverPath,micPath,this::fail,listener::warning);
             deviceSettings.awake(profile.stayAwake);
             checkOpen();
             try(InputStream server=context.getAssets().open("scrcpy-server.jar")){push(connection,serverPath,server);}
@@ -242,10 +242,18 @@ final class ScrcpySession {
     void orientation(boolean landscape) {
         lastLandscape=landscape;
         RemoteDeviceSettings settings=deviceSettings;
-        if(!closed.get() && !gracefulClosing.get() && settings!=null)
-            settings.rotation(profile.syncRotation && !profile.viewOnly ? landscape : null);
+        if(!closed.get() && !gracefulClosing.get() && settings!=null && profile.syncRotation && !profile.viewOnly)
+            settings.rotation(landscape);
     }
-    void syncRotation(boolean enabled) {profile.syncRotation=enabled;orientation(lastLandscape);}
+    void syncRotation(boolean enabled) {
+        profile.syncRotation=enabled;
+        if(enabled)orientation(lastLandscape);
+        else {RemoteDeviceSettings settings=deviceSettings;if(!closed.get() && !gracefulClosing.get() && settings!=null)settings.rotation(null);}
+    }
+    void rotate(boolean right){
+        RemoteDeviceSettings settings=deviceSettings;
+        if(!closed.get() && !gracefulClosing.get() && settings!=null && !profile.viewOnly)settings.rotate(right);
+    }
     void stayAwake(boolean enabled) {
         profile.stayAwake=enabled;RemoteDeviceSettings settings=deviceSettings;
         if(!closed.get() && !gracefulClosing.get() && settings!=null)settings.awake(enabled);
