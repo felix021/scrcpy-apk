@@ -13,12 +13,14 @@ final class Profile {
     String codec = "h264";
     boolean showNavigation = true;
     boolean viewOnly;
+    boolean forwardAudio = true;
+    boolean forwardMic;
     boolean stayAwake = true;
 
     JSONObject json() throws JSONException {
         return new JSONObject().put("name", name).put("host", host).put("port", port)
                 .put("maxSize", maxSize).put("bitrate", bitrate).put("fps", fps)
-                .put("codec", codec).put("showNavigation", showNavigation).put("viewOnly", viewOnly).put("stayAwake", stayAwake);
+                .put("codec", codec).put("forwardAudio",forwardAudio).put("forwardMic",forwardMic).put("showNavigation", showNavigation).put("viewOnly", viewOnly).put("stayAwake", stayAwake);
     }
 
     static Profile from(JSONObject j) {
@@ -28,6 +30,7 @@ final class Profile {
         p.bitrate = j.optInt("bitrate", 6); p.fps = j.optInt("fps", 60);
         p.codec = j.optString("codec", "h264"); p.viewOnly = j.optBoolean("viewOnly");
         p.showNavigation = j.optBoolean("showNavigation", true);
+        p.forwardAudio=j.optBoolean("forwardAudio",true);p.forwardMic=j.optBoolean("forwardMic",false);
         p.stayAwake = j.optBoolean("stayAwake", true);
         return p;
     }

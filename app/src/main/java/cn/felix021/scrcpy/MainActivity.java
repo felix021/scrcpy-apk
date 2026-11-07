@@ -49,7 +49,8 @@ public final class MainActivity extends Activity {
     private SharedPreferences prefs;
     private EditText host, port, size, bitrate, fps;
     private Spinner codec;
-    private Switch viewOnly, stayAwake, showNavigation;
+    private Switch viewOnly, stayAwake, showNavigation, forwardAudio, forwardMic;
+    private Profile permissionProfile;
     private Profile profile;
     private ScrcpySession session;
     private boolean mirroring;
@@ -59,7 +60,13 @@ public final class MainActivity extends Activity {
     private TextView connectionStatus, configLabel;
     private String errorMessage;
     private RemoteInputView remoteInput;
-    private LinearLayout mirrorBody;
+    private LinearLayout mirrorBody, navigation, mirrorActions;
+    private FrameLayout mirrorRoot, dock;
+    private SafeRail statusRail, controlRail;
+    private final java.util.List<View> navigationKeys = new java.util.ArrayList<>();
+    private final java.util.List<View> actionKeys = new java.util.ArrayList<>();
+    private boolean landscapeLayout;
+    private int safeLeft, safeRight, safeTop, safeBottom;
     private RemoteKeyboard remoteKeyboard;
     private ImageButton keyboardToggle;
     private boolean keyboardVisible;
@@ -198,11 +205,18 @@ public final class MainActivity extends Activity {
         add(parameters, label("最长边 0 = 原始尺寸 · H.264 兼容性更好", 10, MUTED), -2); gap(parameters, 4);
         showNavigation = new Switch(this); showNavigation.setText("展示虚拟按键"); showNavigation.setTextSize(14); showNavigation.setTextColor(TEXT); showNavigation.setChecked(profile.showNavigation); add(parameters, showNavigation, 40);
         viewOnly = new Switch(this); viewOnly.setText("仅观看"); viewOnly.setTextSize(14); viewOnly.setTextColor(TEXT); viewOnly.setChecked(profile.viewOnly); add(parameters, viewOnly, 40);
+        LinearLayout sound=row();
+        forwardAudio=new Switch(this);forwardAudio.setText("播放远端声音");forwardAudio.setTextSize(13);forwardAudio.setTextColor(TEXT);forwardAudio.setChecked(profile.forwardAudio);
+        forwardMic=new Switch(this);forwardMic.setText("转发本机麦克风");forwardMic.setTextSize(13);forwardMic.setTextColor(TEXT);forwardMic.setChecked(profile.forwardMic);
+        equal(sound,forwardAudio,false);equal(sound,forwardMic,true);add(parameters,sound,44);
+        forwardMic.setEnabled(!profile.viewOnly);forwardMic.setAlpha(profile.viewOnly?.4f:1);
+        viewOnly.setOnCheckedChangeListener((button,watching) -> {forwardMic.setEnabled(!watching);forwardMic.setAlpha(watching?.4f:1);});
+        add(parameters,label("麦克风转发会替代远端应用的录音输入；仅观看时关闭",10,MUTED),-2);
         stayAwake = new Switch(this); stayAwake.setText("充电时保持远端唤醒"); stayAwake.setTextSize(14); stayAwake.setTextColor(TEXT); stayAwake.setChecked(profile.stayAwake); add(parameters, stayAwake, 40);
         LinearLayout dock = column(); dock.setPadding(dp(16), dp(10), dp(16), dp(12));
         Button connect = button("连接设备   →", true); connect.setTextSize(17); add(dock, connect, 52); add(root, dock, -2);
         connect.setOnClickListener(v -> {
-            try { Profile p = readForm(); persist(p); showMirror(p); }
+            try { Profile p = readForm(); persist(p); connectProfile(p); }
             catch (Exception e) { toast(e.getMessage()); }
         });
     }
@@ -215,7 +229,20 @@ public final class MainActivity extends Activity {
         } catch (NumberFormatException e) { throw new IllegalArgumentException("请填入完整的数字参数"); }
         if (!p.host.equals(profile.host) || p.port != profile.port) p.name = "";
         p.codec = codec.getSelectedItemPosition() == 1 ? "h265" : "h264";
-        p.showNavigation = showNavigation.isChecked(); p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked(); p.validate(); return p;
+        p.showNavigation = showNavigation.isChecked(); p.viewOnly = viewOnly.isChecked(); p.stayAwake = stayAwake.isChecked();p.forwardAudio=forwardAudio.isChecked();p.forwardMic=forwardMic.isChecked(); p.validate(); return p;
+    }
+    private void connectProfile(Profile p) {
+        if(p.forwardMic && !p.viewOnly && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            permissionProfile=p;requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},41);return;
+        }
+        showMirror(p);
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request!=41)return;
+        Profile pending=permissionProfile;permissionProfile=null;
+        if(pending!=null && results.length>0 && results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)showMirror(pending);
+        else toast("需要录音权限才能转发麦克风，也可关闭该选项后连接");
     }
     private void persist(Profile p) {
         try { prefs.edit().putString("last", p.json().toString()).apply(); }
@@ -421,11 +448,11 @@ public final class MainActivity extends Activity {
         profile = p; keyboardVisible = false; mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
         View focus = getCurrentFocus();
         if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
-        View topBuffer = new View(this);
-        root.addView(topBuffer, new LinearLayout.LayoutParams(-1, statusBarHeight()));
-        mirrorBody = row(); root.addView(mirrorBody,new LinearLayout.LayoutParams(-1,0,1));
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
+        FrameLayout root = new FrameLayout(this); mirrorRoot=root;root.setBackgroundColor(BG);setContentView(root);
+        safeLeft=safeRight=safeBottom=0;safeTop=statusBarHeight();landscapeLayout=false;
+        navigationKeys.clear();actionKeys.clear();
+        mirrorBody = row(); root.addView(mirrorBody,new FrameLayout.LayoutParams(-1,-1));
         videoArea = new FrameLayout(this); videoArea.setBackgroundColor(Color.BLACK);
         mirrorBody.addView(videoArea,new LinearLayout.LayoutParams(-1,0,1));
         surface = new SurfaceView(this); surface.setContentDescription("远控屏幕");
@@ -449,14 +476,18 @@ public final class MainActivity extends Activity {
             @Override public void close() { showKeyboard(false); }
         });
         remoteKeyboard.setVisibility(View.GONE);mirrorBody.addView(remoteKeyboard);
-        FrameLayout dock = new FrameLayout(this); dock.setPadding(dp(8),0,dp(8),0); add(root,dock,48);
+        dock = new FrameLayout(this); dock.setPadding(dp(8),0,dp(8),0);
+        root.addView(dock,new FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM));
+        statusRail=new SafeRail(this,false,true);controlRail=new SafeRail(this,true,false);
+        root.addView(statusRail);root.addView(controlRail);
+        statusRail.setVisibility(View.GONE);controlRail.setVisibility(View.GONE);
         connectionStatus=label("正在连接…",9,ACCENT);connectionStatus.setSingleLine(false);connectionStatus.setMaxLines(3);
         connectionStatus.setIncludeFontPadding(false);connectionStatus.setLineSpacing(0,1.05f);
         connectionStatus.setAutoSizeTextTypeUniformWithConfiguration(8,10,1,TypedValue.COMPLEX_UNIT_SP);
         connectionStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
         connectionStatus.setGravity(Gravity.CENTER_VERTICAL);
         dock.addView(connectionStatus,new FrameLayout.LayoutParams(dp(90),-1,Gravity.START|Gravity.CENTER_VERTICAL));
-        LinearLayout navigation=row();navigation.setGravity(Gravity.CENTER);
+        navigation=row();navigation.setGravity(Gravity.CENTER);
         if(p.showNavigation) {
             int[] icons={R.drawable.ic_back,R.drawable.ic_home,R.drawable.ic_recents}, codes={4,3,187};
             String[] names={"Back","Home","最近任务"};
@@ -465,24 +496,25 @@ public final class MainActivity extends Activity {
                 key.setEnabled(!p.viewOnly);key.setAlpha(p.viewOnly?.35f:1);
                 key.setOnClickListener(v -> {if(session!=null)session.key(code);});
                 LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(48),dp(44));
-                if(i<2)lp.setMarginEnd(dp(4));navigation.addView(key,lp);
+                if(i<2)lp.setMarginEnd(dp(4));navigation.addView(key,lp);navigationKeys.add(key);
             }
         }
         dock.addView(navigation,new FrameLayout.LayoutParams(-2,-1,Gravity.CENTER));
-        LinearLayout actions=row();
+        LinearLayout actions=row();mirrorActions=actions;
         keyboardToggle=iconButton(R.drawable.ic_keyboard,"虚拟键盘");keyboardToggle.setEnabled(!p.viewOnly);
         keyboardToggle.setAlpha(p.viewOnly?.35f:1);keyboardToggle.setOnClickListener(v -> showKeyboard(!keyboardVisible));
         LinearLayout.LayoutParams keyboardParams=new LinearLayout.LayoutParams(dp(44),dp(44));keyboardParams.setMarginEnd(dp(4));
-        actions.addView(keyboardToggle,keyboardParams);
+        actions.addView(keyboardToggle,keyboardParams);actionKeys.add(keyboardToggle);
         ImageButton exit=iconButton(R.drawable.ic_disconnect,"断开连接");
-        actions.addView(exit,new LinearLayout.LayoutParams(dp(44),dp(44)));
+        actions.addView(exit,new LinearLayout.LayoutParams(dp(44),dp(44)));actionKeys.add(exit);
         exit.setOnClickListener(v -> confirmDisconnect());
         dock.addView(actions,new FrameLayout.LayoutParams(-2,-1,Gravity.END|Gravity.CENTER_VERTICAL));
         dock.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+            if(landscapeLayout)return;
             int dockWidth=r-l,navWidth=navigation.getMeasuredWidth();
             float start=(dockWidth-navWidth)/2f;
             // Compensate asymmetric cutouts so the three keys stay on the window's centerline.
-            float shift=(root.getPaddingRight()-root.getPaddingLeft())/2f;
+            float shift=(safeRight-safeLeft)/2f;
             shift=Math.max(dock.getPaddingLeft()-start,Math.min(shift,dockWidth-dock.getPaddingRight()-start-navWidth));
             navigation.setTranslationX(shift);
             int leftSpace=Math.max(0,Math.round(start+shift)-dock.getPaddingLeft()-dp(8));
@@ -517,10 +549,8 @@ public final class MainActivity extends Activity {
                 top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
                 bottom = Math.max(bottom, insets.getDisplayCutout().getSafeInsetBottom());
             }
-            root.setPadding(left,0,right,bottom);
-            if (topBuffer.getLayoutParams().height != top) {
-                topBuffer.setLayoutParams(new LinearLayout.LayoutParams(-1, top));
-            }
+            safeLeft=left;safeRight=right;safeTop=top;safeBottom=bottom;
+            updateMirrorLayout();statusRail.requestLayout();controlRail.requestLayout();
             remoteInput.post(this::excludeLocalBackGestures);
             return insets;
         });
@@ -535,7 +565,8 @@ public final class MainActivity extends Activity {
                     private void ui(Runnable r) { runOnUiThread(() -> { if (token == generation) r.run(); }); }
                     @Override public void status(String text) { ui(() -> updateConnectionStatus(text)); }
                     @Override public void size(int w, int h) { ui(() -> { videoWidth = w; videoHeight = h; fitVideo(); }); }
-                    @Override public void ready(String device) { ui(() -> updateConnectionStatus("● " + (p.viewOnly ? "仅观看" : "已连接") + "\n" + device)); }
+                    @Override public void ready(String device) { ui(() -> {updateConnectionStatus("● " + (p.viewOnly ? "仅观看" : "已连接") + "\n" + device);syncOrientation();}); }
+                    @Override public void warning(String message) { ui(() -> toast(message)); }
                     @Override public void error(String message) { ui(() -> disconnect("连接结束：" + message)); }
                 }); session.start();
             }
@@ -571,7 +602,41 @@ public final class MainActivity extends Activity {
     }
     private void updateMirrorLayout() {
         if(!mirroring || mirrorBody==null) return;
-        boolean side=keyboardVisible && getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
+        boolean landscape=isLandscape();
+        if(landscapeLayout!=landscape) {
+            landscapeLayout=landscape;
+            if(landscape) {
+                detach(connectionStatus);statusRail.addView(connectionStatus);
+                for(View key:navigationKeys){detach(key);controlRail.addView(key);}
+                for(View key:actionKeys){detach(key);controlRail.addView(key);}
+            } else {
+                detach(connectionStatus);dock.addView(connectionStatus,new FrameLayout.LayoutParams(dp(90),-1,Gravity.START|Gravity.CENTER_VERTICAL));
+                for(int i=0;i<navigationKeys.size();i++) {
+                    View key=navigationKeys.get(i);detach(key);
+                    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(48),dp(44));
+                    if(i<2)lp.setMarginEnd(dp(4));navigation.addView(key,lp);
+                }
+                for(int i=0;i<actionKeys.size();i++) {
+                    View key=actionKeys.get(i);detach(key);
+                    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(44),dp(44));
+                    if(i==0)lp.setMarginEnd(dp(4));mirrorActions.addView(key,lp);
+                }
+            }
+            dock.setVisibility(landscape?View.GONE:View.VISIBLE);
+            statusRail.setVisibility(landscape?View.VISIBLE:View.GONE);controlRail.setVisibility(landscape?View.VISIBLE:View.GONE);
+        }
+        int left=landscape?Math.max(dp(52),safeLeft+dp(8)):safeLeft;
+        int right=landscape?Math.max(dp(56),safeRight+dp(8)):safeRight;
+        FrameLayout.LayoutParams body=new FrameLayout.LayoutParams(-1,-1);
+        body.setMargins(left,safeTop,right,safeBottom+(landscape?0:dp(48)));
+        setFrame(mirrorBody,body);
+        FrameLayout.LayoutParams bottom=new FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM);
+        bottom.setMargins(safeLeft,0,safeRight,safeBottom);setFrame(dock,bottom);
+        // Rails occupy the original status/cutout band. Their contents avoid the
+        // actual camera rectangles instead of wasting that whole side's height.
+        setFrame(statusRail,new FrameLayout.LayoutParams(left,-1,Gravity.LEFT));
+        setFrame(controlRail,new FrameLayout.LayoutParams(right,-1,Gravity.RIGHT));
+        boolean side=keyboardVisible && landscape;
         mirrorBody.setOrientation(side?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
         LinearLayout.LayoutParams vp=(LinearLayout.LayoutParams)videoArea.getLayoutParams();
         int w=side?0:-1,h=side?-1:0;
@@ -581,6 +646,17 @@ public final class MainActivity extends Activity {
         int keyboardHeight=side?-1:-2;
         if(kp.width!=keyboardWidth || kp.height!=keyboardHeight){kp.width=keyboardWidth;kp.height=keyboardHeight;remoteKeyboard.setLayoutParams(kp);}
         remoteKeyboard.setFillHeight(side);videoArea.post(this::fitVideo);
+    }
+    private boolean isLandscape() { return getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE; }
+    private void detach(View view) { if(view.getParent()!=null)((ViewGroup)view.getParent()).removeView(view); }
+    private void setFrame(View view,FrameLayout.LayoutParams next) {
+        FrameLayout.LayoutParams old=(FrameLayout.LayoutParams)view.getLayoutParams();
+        if(old==null || old.width!=next.width || old.height!=next.height || old.gravity!=next.gravity
+                || old.leftMargin!=next.leftMargin || old.topMargin!=next.topMargin
+                || old.rightMargin!=next.rightMargin || old.bottomMargin!=next.bottomMargin)view.setLayoutParams(next);
+    }
+    private void syncOrientation() {
+        if(mirroring && session!=null && !profile.viewOnly)session.orientation(isLandscape());
     }
     private void showKeyboard(boolean visible) {
         if(!mirroring || profile.viewOnly)return;
@@ -671,7 +747,7 @@ public final class MainActivity extends Activity {
         ScrcpySession s = session; session = null; if (s != null) s.closeGracefully();
         errorMessage = error; showForm();
     }
-    @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); if(mirroring){remoteInput.cancel();remoteKeyboard.reset();mirrorBody.post(this::updateMirrorLayout);} }
+    @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); if(mirroring){remoteInput.cancel();remoteKeyboard.reset();syncOrientation();mirrorBody.post(() -> {updateMirrorLayout();mirrorRoot.requestApplyInsets();});} }
     @Override protected void onStop() { super.onStop(); if (mirroring) disconnect("已离开远控界面，连接已断开"); }
     @Override protected void onDestroy() { if (session != null) session.close(); super.onDestroy(); }
     @Override public void onBackPressed() {

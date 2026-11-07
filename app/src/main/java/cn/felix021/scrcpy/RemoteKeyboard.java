@@ -43,7 +43,7 @@ final class RemoteKeyboard extends LinearLayout {
     }
     private LinearLayout row() {
         LinearLayout row = new LinearLayout(getContext()); row.setGravity(Gravity.CENTER_VERTICAL);
-        LayoutParams lp = new LayoutParams(-1, fillHeight ? 0 : dp(40), fillHeight ? 1 : 0);
+        LayoutParams lp = new LayoutParams(-1, fillHeight ? 0 : dp(38), fillHeight ? 1 : 0);
         addView(row, lp); return row;
     }
     private Button button(LinearLayout row, String label, String description, float weight, Runnable action) {
@@ -92,30 +92,36 @@ final class RemoteKeyboard extends LinearLayout {
     }
     private void render() {
         repeats.removeCallbacksAndMessages(null); removeAllViews();
-        LinearLayout utilities = row();
-        key(utilities,state.fn > 0 ? "Menu" : "Esc",state.fn > 0 ? "菜单键" : "Escape",state.fn > 0 ? 82 : 111,0,1,false);
-        key(utilities,state.fn > 0 ? "Ins" : "Tab",state.fn > 0 ? "Insert" : "Tab",state.fn > 0 ? 124 : 61,0,1,false);
-        ctrlButton = button(utilities,"Ctrl","Ctrl",1,() -> { state.ctrl=KeyboardState.toggle(state.ctrl); render(); });
+        // oh-my-term's two control rows: keep the navigation cross and paired
+        // Home/End, PgUp/PgDn in fixed columns, independent of the Fn layer.
+        LinearLayout firstControls = row(), secondControls = row();
+        key(firstControls,state.fn>0 ? "Menu" : "Esc",state.fn>0 ? "菜单键" : "Escape",state.fn>0 ? 82 : 111,0,1,true);
+        ctrlButton = button(firstControls,"Ctrl","Ctrl",1,() -> { state.ctrl=KeyboardState.toggle(state.ctrl); render(); });
         ctrlButton.setOnLongClickListener(v -> { state.ctrl=KeyboardState.lock(state.ctrl); render(); return true; }); modifierAppearance(ctrlButton,state.ctrl);
-        altButton = button(utilities,"Alt","Alt",1,() -> { state.alt=KeyboardState.toggle(state.alt); render(); });
+        key(firstControls,"Home","Home 键",122,0,1,true);
+        key(firstControls,"↑","Up",19,0,1,true);
+        key(firstControls,"End","End",123,0,1,true);
+        key(firstControls,"PgUp","PgUp",92,0,1,true);
+        if (state.fn > 0) key(firstControls,"F11","F11",141,0,1,false);
+        else button(firstControls,"文字","输入文字",1,() -> { reset();listener.text(); });
+        key(firstControls,"Del","Delete",112,0,1,true);
+        key(secondControls,state.fn>0 ? "Ins" : "Tab",state.fn>0 ? "Insert" : "Tab",state.fn>0 ? 124 : 61,0,1,true);
+        altButton = button(secondControls,"Alt","Alt",1,() -> { state.alt=KeyboardState.toggle(state.alt); render(); });
         altButton.setOnLongClickListener(v -> { state.alt=KeyboardState.lock(state.alt); render(); return true; }); modifierAppearance(altButton,state.alt);
-        shiftButton = button(utilities,"Shift","Shift",1,() -> { state.shift=KeyboardState.toggle(state.shift); render(); });
-        shiftButton.setOnLongClickListener(v -> { state.shift=KeyboardState.lock(state.shift); render(); return true; }); modifierAppearance(shiftButton,state.shift);
-        fnButton = button(utilities,"Fn","Fn",1,() -> { state.fn=KeyboardState.toggle(state.fn); render(); });
-        fnButton.setOnLongClickListener(v -> { state.fn=KeyboardState.lock(state.fn); render(); return true; }); modifierAppearance(fnButton,state.fn);
-        if (state.fn > 0) {
-            key(utilities,"F11","F11",141,0,1,false); key(utilities,"F12","F12",142,0,1,false);
-        } else {
-            button(utilities,"文字","输入文字",1,() -> { reset();listener.text(); }); button(utilities,"粘贴","粘贴",1,() -> { reset();listener.paste(); });
-        }
-        button(utilities,"收起","收起键盘",1,listener::close);
+        key(secondControls,"←","Left",21,0,1,true);
+        key(secondControls,"↓","Down",20,0,1,true);
+        key(secondControls,"→","Right",22,0,1,true);
+        key(secondControls,"PgDn","PgDn",93,0,1,true);
+        if (state.fn > 0) key(secondControls,"F12","F12",142,0,1,false);
+        else button(secondControls,"粘贴","粘贴",1,() -> { reset();listener.paste(); });
+        button(secondControls,"收起","收起键盘",1,listener::close);
         LinearLayout numbers = row();
         String digits = "1234567890";
         for (int i=0;i<digits.length();i++) {
             if (state.fn > 0) key(numbers,"F"+(i+1),"F"+(i+1),131+i,0,1,false);
             else character(numbers,digits.charAt(i));
         }
-        key(numbers,state.fn > 0 ? "Del" : "⌫",state.fn > 0 ? "Delete" : "Backspace",state.fn > 0 ? 112 : 67,0,1.35f,true);
+        key(numbers,"⌫","Backspace",67,0,1.35f,true);
         LinearLayout first = row(), second = row(), third = row();
         if (state.symbols) {
             for (char c : "`~!@#$%^&*".toCharArray()) character(first,c);
@@ -132,9 +138,10 @@ final class RemoteKeyboard extends LinearLayout {
         button(bottom,state.symbols ? "ABC" : "#+=","切换符号",1.4f,() -> { state.symbols=!state.symbols; render(); });
         Button caps = button(bottom,"Caps","Caps Lock",1.4f,() -> { state.caps=!state.caps; render(); });
         modifierAppearance(caps,state.caps ? 2 : 0);
-        key(bottom,"空格","Space",62,0,3.2f,false);
-        String[] labels = state.fn > 0 ? new String[]{"Home","PgDn","PgUp","End"} : new String[]{"←","↓","↑","→"};
-        int[] codes = state.fn > 0 ? new int[]{122,93,92,123} : new int[]{21,20,19,22};
-        for (int i=0;i<4;i++) key(bottom,labels[i],state.fn > 0 ? labels[i] : new String[]{"Left","Down","Up","Right"}[i],codes[i],0,1,true);
+        shiftButton = button(bottom,"Shift","Shift",1.4f,() -> { state.shift=KeyboardState.toggle(state.shift); render(); });
+        shiftButton.setOnLongClickListener(v -> { state.shift=KeyboardState.lock(state.shift); render(); return true; }); modifierAppearance(shiftButton,state.shift);
+        key(bottom,"空格","Space",62,0,4,false);
+        fnButton = button(bottom,"Fn","Fn",1.4f,() -> { state.fn=KeyboardState.toggle(state.fn); render(); });
+        fnButton.setOnLongClickListener(v -> { state.fn=KeyboardState.lock(state.fn); render(); return true; }); modifierAppearance(fnButton,state.fn);
     }
 }

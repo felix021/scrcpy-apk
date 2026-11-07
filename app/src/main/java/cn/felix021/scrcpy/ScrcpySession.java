@@ -34,6 +34,7 @@ final class ScrcpySession {
         void size(int width, int height);
         void ready(String device);
         void error(String message);
+        void warning(String message);
     }
     private final Context context;
     private final Profile profile;
@@ -51,6 +52,9 @@ final class ScrcpySession {
     private volatile AdbStream control;
     private volatile Thread worker;
     private volatile Decoder decoder;
+    private volatile RemoteRotation rotation;
+    private volatile AudioPlayback audioPlayback;
+    private volatile MicForwarder microphone;
     private volatile String serverLog = "";
     private ScheduledFuture<?> startupTimeout;
 
@@ -87,13 +91,21 @@ final class ScrcpySession {
             checkOpen();
             if (!connection.connect(45, TimeUnit.SECONDS, false)) throw new IOException("ADB 授权超时，请在远端允许调试");
             checkOpen();
+            if(!profile.viewOnly)rotation=new RemoteRotation(connection,this::fail);
+            checkOpen();
             listener.status("正在准备远端服务");
             String id = String.format(Locale.ROOT, "%08x", new java.security.SecureRandom().nextInt(0x7fffffff));
             String path = "/data/local/tmp/scrcpy-apk-" + id + ".jar";
-            push(connection, path);
+            try(InputStream server=context.getAssets().open("scrcpy-server.jar")){push(connection,path,server);}
+            if(profile.forwardMic && !profile.viewOnly) {
+                String micPath="/data/local/tmp/scrcpy-mic-"+id+".apk";
+                try(InputStream apk=new java.io.FileInputStream(context.getApplicationInfo().sourceDir)){push(connection,micPath,apk);}
+                checkOpen();
+                microphone=new MicForwarder(context,connection,micPath,"scrcpy_mic_"+id,listener::warning);
+            }
             checkOpen();
             String command = "CLASSPATH=" + path + " app_process / com.genymobile.scrcpy.Server 5.0.1"
-                    + " scid=" + id + " tunnel_forward=true audio=false video=true"
+                    + " scid=" + id + " tunnel_forward=true audio="+profile.forwardAudio+" audio_codec=aac video=true"
                     + " cleanup=true clipboard_autosync=false power_on=true" + profile.serverOptions();
             AdbStream shell = connection.open("shell:" + command);
             new Thread(() -> {
@@ -115,6 +127,10 @@ final class ScrcpySession {
             if (video == null) throw new IOException("远端投屏服务未启动。" + serverLog);
             DataInputStream input = input(video);
             if (input.readUnsignedByte() != 0) throw new IOException("无效的服务握手");
+            if(profile.forwardAudio) {
+                AdbStream audio=connection.open(destination);
+                audioPlayback=new AudioPlayback(context,audio,listener::warning);
+            }
             if (!profile.viewOnly) {
                 control = connection.open(destination);
                 controlWriter = new Thread(() -> {
@@ -182,8 +198,8 @@ final class ScrcpySession {
         }
     }
 
-    private void push(AdbConnection connection, String path) throws Exception {
-        try (AdbStream stream = connection.open("sync:"); InputStream asset = context.getAssets().open("scrcpy-server.jar")) {
+    private void push(AdbConnection connection, String path, InputStream asset) throws Exception {
+        try (AdbStream stream = connection.open("sync:")) {
             sync(stream, "SEND", (path + ",33216").getBytes(StandardCharsets.UTF_8));
             byte[] buffer = new byte[Math.min(65528, connection.getMaxData() - 8)]; int n;
             while ((n = asset.read(buffer)) != -1) {
@@ -224,6 +240,10 @@ final class ScrcpySession {
     void key(int keycode) { send(Protocol.chord(keycode, 0)); }
     void key(int keycode, int metaState) { send(Protocol.chord(keycode, metaState)); }
     void paste(String text) { send(Protocol.paste(text)); }
+    void orientation(boolean landscape) {
+        RemoteRotation r=rotation;
+        if(!closed.get() && !gracefulClosing.get() && r!=null)r.set(landscape);
+    }
     void expandSettings() { send(new byte[]{6}); }
     void touch(int action, long pointer, int x, int y, int w, int h, float pressure) {
         send(Protocol.touch(action, pointer, x, y, w, h, pressure));
@@ -238,13 +258,25 @@ final class ScrcpySession {
 
     void closeGracefully() {
         if(closed.get() || !gracefulClosing.compareAndSet(false,true))return;
-        if(control==null || !controls.offer(END_CONTROLS)){close();return;}
-        try {timer.schedule(this::close,750,TimeUnit.MILLISECONDS);}
+        closeAudio();
+        RemoteRotation r=rotation;
+        if(r==null)finishControls();else r.finish(this::finishControls);
+        try {timer.schedule(this::close,2500,TimeUnit.MILLISECONDS);}
         catch(java.util.concurrent.RejectedExecutionException e){close();}
+    }
+    private void finishControls() {
+        if(control==null || !controls.offer(END_CONTROLS)){close();return;}
+    }
+
+    private void closeAudio() {
+        MicForwarder mic=microphone;if(mic!=null)mic.close();
+        AudioPlayback audio=audioPlayback;if(audio!=null)audio.close();
     }
 
     boolean close() {
         if (!closed.compareAndSet(false, true)) return false;
+        closeAudio();
+        RemoteRotation r=rotation;if(r!=null)r.close();
         timer.shutdownNow(); controls.clear();
         Thread writer = controlWriter; if (writer != null) writer.interrupt();
         // Closing the transport unblocks all ADB readers/writers; codec teardown

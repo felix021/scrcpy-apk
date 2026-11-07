@@ -7,6 +7,11 @@ import re
 import shlex
 import subprocess
 import time
+import threading
+import queue
+import socket
+import struct
+import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -15,7 +20,7 @@ P.add_argument('--client', required=True, help='AVD adb serial')
 P.add_argument('--target', required=True, help='target adb serial, already authorized on this host')
 P.add_argument('--host', required=True, help='target address reachable from AVD')
 P.add_argument('--port', type=int, default=5555)
-P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs'], default='all',
+P.add_argument('--phase', choices=['all', 'lifecycle', 'ui', 'controls', 'keyboard', 'configs', 'insets', 'appearance', 'dialogs', 'text-dialogs', 'landscape', 'rotation', 'audio'], default='all',
                help='Run core, lifecycle, UI, controls, keyboard, configs, insets, appearance, or dialogs checks')
 P.add_argument('--output', required=True, type=Path, help='artifacts directory outside the repository')
 a = P.parse_args()
@@ -136,7 +141,7 @@ def wait_connected():
         root = dump()
         if any('已连接' in n.get('text', '') or (n.get('text', '').startswith('● ') and '仅观看' in n.get('text', '')) for n in root.iter('node')):
             return root
-        if any('连接结束：' in n.get('text','') for n in root.iter('node')) or find(text='连接设备   →', root=root):
+        if any('连接结束：' in n.get('text','') for n in root.iter('node')) or find(text='连接设备   →', root=root) is not None:
             raise AssertionError('Connection returned to form: ' + str([n.get('text') for n in root.iter('node')]))
         time.sleep(.5)
     raise AssertionError('No rendered frame within 60 seconds')
@@ -386,7 +391,7 @@ def verify_controls():
         key('Shift');key('字符 <');expect_text('b<')
         key('切换符号');key('Shift');key('字符 {');expect_text('b<{')
         key('切换符号')
-        key('Fn');key('F1');key('Fn');key('F11');key('Fn');key('Home')
+        key('Fn');key('F1');key('Fn');key('F11');key('Home 键')
         remote_logs=input_logs()
         assert all('KEY '+str(code)+' META ' in remote_logs for code in [131,141,122])
         key('Alt');key('Left')
@@ -419,7 +424,7 @@ def verify_controls():
         root=wait_connected();v=bounds(find(desc='远控屏幕',root=root))
         assert v[2]-v[0]>v[3]-v[1]
         screenshot('17-both-landscape')
-        record('both devices landscape: aspect ratio, safe areas and bottom row retained')
+        record('both devices landscape: aspect ratio, safe areas and side rail retained')
         tap('断开');rotate(a.client,0);rotate(a.target,0);bottom();tap('展示虚拟按键');connect()
         root=dump();assert all(find(desc=d,root=root) is None for d in ['Back','Home','最近任务'])
         assert find(desc='虚拟键盘',root=root) is not None
@@ -429,6 +434,243 @@ def verify_controls():
         record('navigation can be hidden while full keyboard and edge actions remain available')
     finally:
         if nav:shell(a.target,'cmd','overlay','enable-exclusive','--category',nav)
+
+
+def verify_landscape():
+    def bounds(node):
+        assert node is not None
+        return tuple(map(int,re.findall(r'\d+',node.get('bounds'))))
+    def rotate(value):
+        shell(a.client,'settings','put','system','accelerometer_rotation',0)
+        shell(a.client,'settings','put','system','user_rotation',value)
+    def shape(landscape):
+        end=time.monotonic()+15
+        while time.monotonic()<end:
+            root=wait_connected();v=bounds(find(desc='远控屏幕',root=root))
+            if ((v[2]-v[0])>(v[3]-v[1]))==landscape:return root
+        raise AssertionError('Remote did not follow local orientation')
+    def rails(name):
+        root=shape(True)
+        status=bounds(find(desc='横屏连接状态',root=root));rail=bounds(find(desc='横屏操作栏',root=root))
+        video=bounds(find(desc='远控屏幕',root=root))
+        keys=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务','虚拟键盘','断开连接']]
+        assert status[2]<=video[0] and video[2]<=rail[0],(status,video,rail)
+        assert len({(k[0]+k[2])//2 for k in keys})==1,keys
+        assert all(keys[i][3]<=keys[i+1][1] for i in range(len(keys)-1)),keys
+        area=bounds(find(desc='远控触控区',root=root))
+        assert area[3]-area[1]>1080*.83,area
+        windows=shell(a.client,'dumpsys','window','displays')
+        (a.output/(name+'-window.txt')).write_text(windows)
+        camera_rects=[]
+        for section in re.findall(r'boundingRect=\{Bounds=\[(.*?)\]\}',windows):
+            for coords in re.findall(r'Rect\((\d+), (\d+) - (\d+), (\d+)\)',section):
+                c=tuple(map(int,coords))
+                if c[2]>c[0] and c[3]>c[1]:camera_rects.append(c)
+        if 'middle-camera' in name:
+            assert any(c[1]<540<c[3] for c in camera_rects),camera_rects
+        status_text=next(n for n in root.iter('node') if '已连接' in n.get('text',''))
+        for item in keys+[bounds(status_text)]:
+            for c in camera_rects:
+                assert item[2]<=c[0] or c[2]<=item[0] or item[3]<=c[1] or c[3]<=item[1],(item,c)
+        screenshot(name)
+        return root
+    device_overlay=next((line.split()[-1] for line in shell(a.client,'cmd','overlay','list').splitlines()
+                         if line.startswith('[x]') and '.emulation.pixel_' in line),None)
+    previous_overlay=next((line.split()[-1] for line in shell(a.client,'cmd','overlay','list').splitlines()
+                           if line.startswith('[x]') and '.cutout.' in line),None)
+    rotate(0);shell(a.target,'settings','put','system','accelerometer_rotation',0)
+    shell(a.target,'settings','put','system','user_rotation',0)
+    tap('省流');connect();start_probe();adb(a.client,'logcat','-c')
+    try:
+        for i,value in enumerate([1,0,3,0]):
+            rotate(value);root=shape(value!=0)
+            if value:rails('30-landscape-'+str(value))
+            else:
+                nav=[bounds(find(desc=d,root=root)) for d in ['Back','Home','最近任务']]
+                assert len({n[1] for n in nav})==1
+                assert abs((nav[0][0]+nav[-1][2])/2-540)<3,nav
+            assert_log('ROTATION '+str(2 if value else 1))
+        record('local portrait/landscape events rotate target both ways without reconnecting; side rails and centered portrait dock survive both landscape directions')
+        before=adb(a.client,'logcat','-d','-s','RemoteRotation:D','*:S').count('SET_ORIENTATION')
+        time.sleep(3.5)
+        assert adb(a.client,'logcat','-d','-s','RemoteRotation:D','*:S').count('SET_ORIENTATION')==before
+        record('stable frames do not cause repeated rotation commands')
+        # Changing a framework resource overlay recreates Activities, so apply
+        # the simulated hardware before making a new connection.
+        tap('断开')
+        if device_overlay:shell(a.client,'cmd','overlay','disable',device_overlay)
+        shell(a.client,'cmd','overlay','enable-exclusive','--category','com.android.internal.display.cutout.emulation.tall')
+        time.sleep(2)
+        shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+        connect()
+        rotate(1);rails('31-middle-camera-left')
+        rotate(3);rails('32-middle-camera-right')
+        record('landscape rails avoid central camera cutout in both directions')
+        click(find(desc='虚拟键盘'));root=dump()
+        keyboard=bounds(find(desc='完整虚拟键盘',root=root));video=bounds(find(desc='远控屏幕',root=root))
+        assert video[2]<=keyboard[0]
+        first=[bounds(find(desc=d,root=root)) for d in ['Escape','Ctrl','Home 键','Up','End','PgUp','输入文字','Delete']]
+        second=[bounds(find(desc=d,root=root)) for d in ['Tab','Alt','Left','Down','Right','PgDn','粘贴','收起键盘']]
+        assert len({n[1] for n in first})==len({n[1] for n in second})==1
+        assert first[0][3]<=second[0][1]
+        screenshot('33-landscape-two-control-rows')
+        click(find(desc='收起键盘'));click(find(desc='断开连接'));tap('取消');wait_connected()
+        record('two control rows retain their navigation cross in landscape; disconnect cancel keeps session')
+        rotate(0);shape(False);tap('断开');bottom();tap('仅观看');connect()
+        rotate(1);time.sleep(1)
+        root=shape(False)
+        assert find(desc='虚拟键盘',root=root).get('enabled')=='false'
+        assert 'ROTATION 2' not in logs().split('ROTATION 1')[-1]
+        record('view-only does not change remote orientation')
+        tap('断开');rotate(0);bottom();tap('仅观看')
+    finally:
+        shell(a.client,'cmd','overlay','disable','com.android.internal.display.cutout.emulation.tall')
+        if previous_overlay:shell(a.client,'cmd','overlay','enable-exclusive','--category',previous_overlay)
+        if device_overlay:shell(a.client,'cmd','overlay','enable-exclusive','--category',device_overlay)
+
+
+def verify_rotation_restoration():
+    def settings():
+        return tuple(shell(a.target,'settings','get','system',key).strip() for key in ['accelerometer_rotation','user_rotation'])
+    def expect(values):
+        deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            actual=settings()
+            if actual==values:return
+            time.sleep(.2)
+        raise AssertionError(('Remote rotation settings differ',values,actual))
+    def local(value):
+        shell(a.client,'settings','put','system','accelerometer_rotation',0)
+        shell(a.client,'settings','put','system','user_rotation',value)
+    def video(landscape):
+        deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            root=wait_connected();node=find(desc='远控屏幕',root=root)
+            l,t,r,b=map(int,re.findall(r'\d+',node.get('bounds')))
+            if ((r-l)>(b-t))==landscape:return
+        raise AssertionError('Target did not follow explicit local orientation')
+    shell(a.target,'settings','put','system','user_rotation',0)
+    shell(a.target,'settings','put','system','accelerometer_rotation',1)
+    local(0);tap('省流');connect();expect(('0','0'));start_probe();video(False);expect(('0','0'))
+    local(1);video(True);expect(('0','1'))
+    local(0);video(False);expect(('0','0'))
+    tap('断开');expect(('1','0'))
+    record('auto-rotating target follows explicit local portrait/landscape; disconnect restores original rotation and auto-rotate')
+    connect();start_probe();local(1);video(True);expect(('0','1'))
+    shell(a.client,'am','force-stop',PKG);expect(('1','0'))
+    record('force-stopping client still restores remote rotation through remote shell EXIT cleanup')
+    local(0);shell(a.client,'am','start','-n',PKG+'/.MainActivity');bottom();tap('仅观看')
+    original=settings();connect();local(1);wait_connected();time.sleep(.5)
+    assert settings()==original
+    record('view-only leaves both remote rotation settings unchanged')
+    tap('断开');local(0);bottom();tap('仅观看')
+
+
+def verify_audio():
+    def sound(text,enabled):
+        bottom();node=find(text=text)
+        assert node is not None and node.get('enabled')=='true',text
+        if node.get('checked')!=str(enabled).lower():click(node)
+    def audio_logs():
+        return adb(a.client,'logcat','-d','-s','ScrcpyAudio:I','*:S')
+    def wait_mic():
+        deadline=time.monotonic()+20
+        while time.monotonic()<deadline:
+            logs=audio_logs()
+            if 'MIC_STARTED' in logs:return
+            assert 'MIC_FAILED' not in logs,logs
+            time.sleep(.2)
+        raise AssertionError('Local microphone did not start')
+    media_volumes={}
+    for serial in [a.client,a.target]:
+        value=shell(serial,'cmd','media_session','volume','--stream',3,'--get')
+        media_volumes[serial]=int(re.search(r'volume is (\d+)',value)[1])
+    original_audio=find(text='播放远端声音').get('checked')=='true'
+    original_mic=find(text='转发本机麦克风').get('checked')=='true'
+    shell(a.client,'am','force-stop',PKG)
+    shell(a.client,'pm','revoke',PKG,'android.permission.RECORD_AUDIO')
+    shell(a.client,'pm','clear-permission-flags',PKG,'android.permission.RECORD_AUDIO','user-set','user-fixed')
+    shell(a.client,'am','start','-n',PKG+'/.MainActivity')
+    bottom()
+    if find(text='仅观看').get('checked')=='true':tap('仅观看')
+    sound('播放远端声音',False);sound('转发本机麦克风',True)
+    adb(a.client,'logcat','-c');tap('连接设备   →');root=dump()
+    deny=next((n for n in root.iter('node') if n.get('resource-id','').endswith('/permission_deny_button')),None)
+    assert deny is not None,'Mic permission was not requested'
+    click(deny);assert find(text='连接设备   →') is not None
+    assert 'MIC_STARTED' not in audio_logs()
+    sound('转发本机麦克风',False)
+    record('microphone permission is requested only when enabled; denying permission keeps form and never starts recording')
+    shell(a.client,'pm','grant',PKG,'android.permission.RECORD_AUDIO')
+    shell(a.target,'pm','grant',PROBE,'android.permission.RECORD_AUDIO')
+    source_apk='/data/local/tmp/scrcpy-mic-source-validation.apk'
+    capture_apk='/data/local/tmp/scrcpy-audio-validation.apk'
+    name='scrcpy_mic_validation_'+str(time.time_ns())
+    adb(a.client,'push',ROOT/'app/build/outputs/apk/debug/app-debug.apk',source_apk)
+    adb(a.client,'push',ROOT/'validation/probe/build/outputs/apk/debug/probe-debug.apk',capture_apk)
+    process=subprocess.Popen(['adb','-s',a.client,'shell','CLASSPATH='+source_apk+' app_process / '+PKG+'.MicServer '+name+' '+source_apk],
+                             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    lines=queue.Queue()
+    def read_lines():
+        for line in process.stdout:lines.put(line)
+        lines.put('EOF')
+    threading.Thread(target=read_lines,daemon=True).start()
+    forwarded=None;connection=None;producer=None;stopping=threading.Event()
+    try:
+        deadline=time.monotonic()+15;messages=[]
+        while time.monotonic()<deadline:
+            line=lines.get(timeout=max(.1,deadline-time.monotonic()));messages.append(line)
+            if 'MIC_READY' in line:break
+            assert line!='EOF',''.join(messages)
+        else:raise AssertionError('Source mic injector did not start')
+        forwarded=int(adb(a.client,'forward','tcp:0','localabstract:'+name).strip())
+        connection=socket.create_connection(('127.0.0.1',forwarded))
+        def produce():
+            count=0;start=time.monotonic()
+            try:
+                while not stopping.is_set():
+                    samples=[int(math.sin(2*math.pi*997*(count+i)/16000)*12000) for i in range(320)]
+                    count+=len(samples);data=struct.pack('<'+'h'*len(samples),*samples)
+                    connection.sendall(struct.pack('>H',len(data))+data)
+                    stopping.wait(max(0,start+count/16000-time.monotonic()))
+            except OSError:
+                if not stopping.is_set():raise
+        producer=threading.Thread(target=produce,daemon=True);producer.start()
+        for playback,mic in [(False,False),(True,False),(False,True),(True,True)]:
+            sound('播放远端声音',playback);sound('转发本机麦克风',mic)
+            screenshot('40-audio-options-'+str(int(playback))+str(int(mic)))
+            adb(a.client,'logcat','-c');adb(a.target,'logcat','-c');connect()
+            if mic:wait_mic()
+            shell(a.target,'cmd','media_session','volume','--stream',3,'--set',15)
+            shell(a.target,'am','force-stop',PROBE)
+            shell(a.target,'am','start','-W','-n',PROBE+'/.AudioActivity','--es','mode','both','--ei','frequency',1499)
+            output=shell(a.client,'CLASSPATH='+capture_apk+' app_process / '+PROBE+'.CaptureOutput')
+            (a.output/('audio-'+str(int(playback))+str(int(mic))+'.txt')).write_text(output+'\n'+audio_logs())
+            match=re.search(r'PLAYBACK_TONE1499=(\d+)',output);assert match,output
+            amplitude=int(match[1]);assert (amplitude>100)==playback,(playback,mic,amplitude,output,audio_logs())
+            remote=adb(a.target,'logcat','-d','-s','ScrcpyAudioProbe:I','*:S')
+            (a.output/('remote-audio-'+str(int(playback))+str(int(mic))+'.txt')).write_text(remote)
+            tones=[int(n) for n in re.findall(r'tone997=(\d+)',remote)]
+            assert tones,'No target AudioRecord measurements'
+            assert (max(tones)>1000)==mic,(playback,mic,max(tones),audio_logs())
+            assert ('MIC_STARTED' in audio_logs())==mic
+            assert ('PLAYBACK_PCM' in audio_logs())==playback
+            record('audio independent switches playback='+str(playback)+' mic='+str(mic)+': actual client output tone1499='+str(amplitude)+', remote recorder tone997='+str(max(tones)))
+            tap('断开');shell(a.target,'am','force-stop',PROBE)
+        record('both directions work simultaneously; disabled microphone is never captured and disabled playback produces no forwarded output')
+        sound('播放远端声音',original_audio);sound('转发本机麦克风',original_mic)
+        connect();tap('断开')
+    finally:
+        stopping.set()
+        if connection:connection.close()
+        if producer:producer.join(2)
+        if forwarded:adb(a.client,'forward','--remove','tcp:'+str(forwarded))
+        if process.stdin:process.stdin.close()
+        try:process.wait(timeout=5)
+        except subprocess.TimeoutExpired:process.terminate()
+        shell(a.client,'am','force-stop',PKG)
+        shell(a.client,'rm','-f',source_apk,capture_apk)
+        for serial,volume in media_volumes.items():shell(serial,'cmd','media_session','volume','--stream',3,'--set',volume)
 
 
 def verify_top_buffer():
@@ -478,9 +720,10 @@ def verify_configs():
         raw=shell(a.client,'run-as',PKG,'cat','shared_prefs/connections.xml')
         values=ET.fromstring(raw)
         return json.loads(next((n.text for n in values if n.get('name')=='profiles'),'[]'))
-    def switches(navigation, watching, awake):
+    def switches(navigation, watching, awake, audio=True, mic=False):
         bottom()
-        for text,value in [('展示虚拟按键',navigation),('仅观看',watching),('充电时保持远端唤醒',awake)]:
+        if find(text='仅观看').get('checked')=='true':tap('仅观看')
+        for text,value in [('展示虚拟按键',navigation),('播放远端声音',audio),('转发本机麦克风',mic),('仅观看',watching),('充电时保持远端唤醒',awake)]:
             if find(text=text).get('checked')!=str(value).lower():tap(text)
     def save(name=None, suggested=None):
         top();tap('保存配置')
@@ -507,9 +750,9 @@ def verify_configs():
             node=next((n for n in nodes if n.get('content-desc')==desc),None)
             assert node is not None and node.get('text')==str(profile[key]), (desc,node.attrib if node is not None else None)
         assert any(n.get('text')==('H.265' if profile['codec']=='h265' else 'H.264') for n in nodes)
-        for text,key in [('展示虚拟按键','showNavigation'),('仅观看','viewOnly'),('充电时保持远端唤醒','stayAwake')]:
+        for text,key in [('展示虚拟按键','showNavigation'),('仅观看','viewOnly'),('播放远端声音','forwardAudio'),('转发本机麦克风','forwardMic'),('充电时保持远端唤醒','stayAwake')]:
             node=next(n for n in nodes if n.get('text')==text)
-            assert node.get('checked')==str(profile.get(key,key!='viewOnly')).lower(), key
+            assert node.get('checked')==str(profile.get(key,key not in ['viewOnly','forwardMic'])).lower(), key
     def remove(name, confirm=True):
         root=picker()
         click(next(n for n in root.iter('node') if n.get('content-desc','').startswith(name+'\n')))
@@ -523,11 +766,11 @@ def verify_configs():
         record('existing saved connection restores after upgrading from previous APK')
     top();edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port));tap('省流')
     edit('最长边 · px','1280');switches(True,False,True);save(name_a)
-    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True)
+    config_a=dict(name=name_a,host=a.host,port=a.port,maxSize=1280,bitrate=2,fps=30,codec='h264',showNavigation=True,viewOnly=False,stayAwake=True,forwardAudio=True,forwardMic=False)
     top();edit('设备 IP / 主机名','second-device.example');edit('ADB 端口','5566');tap('高清')
     edit('最长边 · px','1920');edit('帧率上限 · FPS','45');click(find(desc='视频编码'));tap('H.265')
-    switches(False,True,False);save(name_b,'second-device.example:5566')
-    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False)
+    switches(False,True,False,audio=False,mic=True);save(name_b,'second-device.example:5566')
+    config_b=dict(name=name_b,host='second-device.example',port=5566,maxSize=1920,bitrate=12,fps=45,codec='h265',showNavigation=False,viewOnly=True,stayAwake=False,forwardAudio=False,forwardMic=True)
     root=picker()
     assert find(desc=name_a+'\n'+a.host+':'+str(a.port),root=root) is not None
     assert find(desc=name_b+'\nsecond-device.example:5566',root=root) is not None
@@ -743,6 +986,11 @@ def verify_dialogs(text_only=False):
 
 
 try:
+    # All form helpers use portrait coordinates. Normalize after snapshotting,
+    # including when a previous interrupted run left the client in landscape.
+    shell(a.client,'am','force-stop',PKG)
+    shell(a.client,'settings','put','system','accelerometer_rotation',0)
+    shell(a.client,'settings','put','system','user_rotation',0)
     adb(a.client, 'install', '-r', ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
     adb(a.target, 'install', '-r', ROOT / 'validation/probe/build/outputs/apk/debug/probe-debug.apk')
     shell(a.target, 'input', 'keyevent', 224)
@@ -756,6 +1004,9 @@ try:
     bottom()
     if find(text='仅观看').get('checked') == 'true':
         tap('仅观看')
+    if a.phase!='audio':
+        node=find(text='转发本机麦克风')
+        if node is not None and node.get('checked')=='true':click(node)
     if a.phase == 'ui':
         verify_ui()
         sys.exit(0)
@@ -769,6 +1020,15 @@ try:
         sys.exit(0)
     if a.phase == 'configs':
         verify_configs()
+        sys.exit(0)
+    if a.phase == 'audio':
+        verify_audio()
+        sys.exit(0)
+    if a.phase == 'rotation':
+        verify_rotation_restoration()
+        sys.exit(0)
+    if a.phase == 'landscape':
+        verify_landscape()
         sys.exit(0)
     if a.phase == 'insets':
         tap('省流');verify_top_buffer()
