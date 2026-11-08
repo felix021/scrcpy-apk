@@ -9,7 +9,8 @@
 | JDK | 11；Java 源码目标兼容级别为 8 |
 | Android SDK | compile / target SDK 31，min SDK 26；构建工具可使用 30.0.2 |
 | Gradle / Android Gradle Plugin | wrapper 7.0.2 / AGP 7.0.0，由仓库固定 |
-| Python 3.8+ | 文档检查与 AVD 验证脚本 |
+| Python 3.8+ | 加密源码下载、文档检查与 AVD 验证脚本 |
+| NDK / CMake | 28.0.13004108 / 3.31.6；BoringSSL 与 JNI，四种 ABI |
 | Bash、curl、sha256sum | 下载并校验官方 server |
 | adb、Android Emulator | 仅设备验证时需要 |
 
@@ -39,7 +40,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 缺少 SDK 组件时，通过 Android SDK Manager 安装；命令行示例：
 
 ```bash
-sdkmanager "platforms;android-31" "build-tools;30.0.2" "platform-tools"
+sdkmanager "platforms;android-31" "build-tools;30.0.2" "platform-tools" "ndk;28.0.13004108" "cmake;3.31.6"
 ```
 
 运行：
@@ -79,3 +80,9 @@ Gradle 依赖、wrapper 和 server 已准备好时，可加 `--offline`。该选
 检查 Git 差异只包含预期源码和文档。[.gitignore](../.gitignore) 排除构建输出、APK、SDK 本地配置、日志和 Python 缓存。不要提交密钥、截图、真实配置、私人主机名或 IP；验证记录使用泛化环境说明，原始材料留在仓库外。
 
 行为变化同步主题文档；必要时补充 [版本验证记录](validation/README.md)。实际交付见 [发布指南](release.md)。
+
+### 无线调试的原生依赖
+
+`prepareCrypto` 调用 `scripts/build-crypto.sh`，先校验固定 BoringSSL 归档，再为 arm64-v8a、armeabi-v7a、x86_64、x86 单独编译静态库；Gradle 随后用 CMake 链接 JNI。现有 AGP 7 无法表示 BoringSSL 部分多输出目标，因此独立编译，不升级整套 Gradle 工具链。默认原生编译并行度为 2，可通过 `SCRCPY_CRYPTO_JOBS` 调整。
+
+源码与静态库放根 `build/boringssl/`，JNI 缓存放 `app/.cxx/`，均不进 Git。`--offline` 不会阻止首次 BoringSSL 归档下载；准备缓存时仍需保留 SHA-256 校验。ZXing core 用于二维码生成，版本在 app 构建文件固定，许可与来源见第三方说明。

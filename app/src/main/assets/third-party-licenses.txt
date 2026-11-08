@@ -228,3 +228,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+Wireless ADB components:
+BoringSSL 0131ae9d78e42fcc2c1811315e62410ad96d8230 (Apache-2.0), see BoringSSL-LICENSE.txt.
+ZXing core 3.5.3 (Apache-2.0), see zxing-LICENSE.txt.
+Native pairing primitives adapted via scrcpy-ios 28d2c66d123e11b3410bce62a4fdbd67172be4fc (GPL-3.0)
+from lionlggnd/ADBClient-iOS 31057ba6defd0d1a7454503e662f49b05ef21c2a (GPL-3.0), see COPYING.txt.
+Corresponding source: https://github.com/google/boringssl/tree/0131ae9d78e42fcc2c1811315e62410ad96d8230
+https://github.com/zxing/zxing/tree/zxing-3.5.3
+https://github.com/felix021/scrcpy-ios/tree/28d2c66d123e11b3410bce62a4fdbd67172be4fc
+https://github.com/lionlggnd/ADBClient-iOS/tree/31057ba6defd0d1a7454503e662f49b05ef21c2a

@@ -99,3 +99,31 @@ python3 scripts/verify-avd.py \
 AVD 之间的 TCP 连接可以验证共用会话功能，JVM 可以模拟 USB 包、授权与取消，但两者都不能代替 USB Host / OTG 实机链路。USB 实机关注角色协商、本机访问 / 远端授权、持续画面与操作、声音、拔线退出等。当前 USB 功能已经用户实机验收通过，型号和逐项明细未单独记录；不要把它扩写成所有设备均已通过。
 
 归档新结果时使用 [验证记录约定](validation/README.md)，历史验收不自动证明当前改动没有回归。
+
+## 无线配对专项
+
+脚本先构建 `:app:assembleDebug :app:assembleDebugAndroidTest`，构建失败即停止，不安装旧 APK。无线专项使用自有 instrumentation runner，仅通过 [verify-wireless.py](../scripts/verify-wireless.py) 指定两台设备运行；不要让 Gradle 自动遍历所有已连接设备。
+
+```bash
+python3 scripts/verify-wireless.py \
+  --client '<owned-client-serial>' --target '<owned-target-serial>' \
+  --host '<host-address-reachable-from-client>' \
+  --pair-forward '<unused-local-port>' --connect-forward '<unused-local-port>' \
+  --bridge-port '<unused-local-port>' --output '<private-temporary-directory>'
+```
+
+目标使用可调试的 Android 16 AVD，预先启用并信任其无线调试 Wi-Fi。脚本会安装主控 / test APK、向目标临时复制 test APK 内的系统配对 fixture，分别执行错误码、正确六位码与二维码配对，进入真实 TLS 视频首帧，再打开设置、确认断开；最后回归传统 TCP 视频与断开（默认目标端口 5555，可用 `--classic-port` 指定）。它还核对 Android 保存的完整名称。`--modes code` 可只运行单项，`--apk <built-release.apk>` 可验证最终签名包；模拟器网关不可达时用 `--host 127.0.0.1 --reverse`，脚本只创建并清理自己成功绑定的端口，已占用的端口会拒绝覆盖；`ADB_SERVER_SOCKET` 传递给所有 adb 子进程。
+
+二维码专项解码主控界面实际显示的图像，把内容交给目标系统配对入口；为跨 AVD NAT 的设备发现和网络流建立临时 NSD / TCP 代理。这个结果不能代替实体相机扫码验收。代理只在测试 APK 内，生产 APK 不包含测试入口。所有临时端口、注册和目标 fixture 在结束时清理。系统配对服务是单例，每次先取消旧服务，禁止并发运行。
+
+目标 `dumpsys servicediscovery` 同时包含当前服务和历史日志；脚本只接受当前活跃 Advertiser ID 对应的端口，不能拿历史记录里的旧配对端口做新一轮测试。六位码与 QR 秘密不写公开报告，原始输出保存在仓库外。专项会改主控语言、本机名称和配置，使用可接受这些变更的专用设备。
+
+中英文配对布局可在明确指定的主控上运行专项（不连接目标）：
+
+```bash
+adb -s '<owned-client-serial>' shell am instrument -w -r \
+  -e mode layout -e language en \
+  cn.felix021.scrcpy.test/cn.felix021.scrcpy.WirelessPairingTest
+```
+
+语言改为 `zh` 再运行一次。专项实际编辑本机名称，检查竖屏与左右横屏的二维码可解码、底部按钮完整可见；测试截图保存在专用主控的私有文件中，包含临时配对秘密，取出后仅存私有临时目录，不能提交或公开。

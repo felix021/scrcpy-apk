@@ -4,7 +4,7 @@
 
 ## 数据路径
 
-应用使用原生 Java / Android View，不依赖宿主机 adb 可执行文件。传统 TCP Socket 与 Android USB Host 提供字节流，再交给同一套 vendored adblib 完成 RSA 授权和 ADB 逻辑通道。视频、控制、声音和 shell 服务共用这一条 ADB 连接。
+应用使用原生 Java / Android View，不依赖宿主机 adb 可执行文件。传统 / TLS TCP Socket 与 Android USB Host 提供字节流，再交给同一套 vendored adblib 完成 RSA 授权和 ADB 逻辑通道。视频、控制、声音和 shell 服务共用这一条 ADB 连接。
 
 ```mermaid
 flowchart LR
@@ -30,6 +30,8 @@ flowchart LR
 | 文件 / 模块 | 职责 |
 | --- | --- |
 | `MainActivity.java` | 配置、保存 / 切换弹窗、USB 权限、设置、会话状态、Surface 生命周期、横竖屏布局 |
+| `PairingDialog.java`、`AdbIdentity.java` | 无线配对界面、本机名称、各传输共用的持久化 RSA 身份 |
+| `adb/`、`src/main/cpp/` | mDNS 发现、配对包、STLS / TLS 传输、BoringSSL JNI 包装 |
 | `Profile.java`、`UiText.java` | 配置 JSON 与缺省兼容；应用级语言选择 |
 | `ScrcpySession.java` | 建连、RSA 身份、服务上传、视频头与帧解析、控制队列、运行时服务开关、关闭协调 |
 | `Protocol.java` | scrcpy 按键 / 组合键、触控、剪贴板控制消息编码 |
@@ -53,6 +55,8 @@ flowchart LR
 5. 解析设备信息、编码信息、画面尺寸和帧数据，由 `MediaCodec` 解码到 Surface。首帧真正渲染后才报告就绪。
 6. 开启所需声音 / 麦克风服务；后续运行时开关通过串行任务调整服务，不重建视频通道。
 7. 正常断开先取消输入、停止声音和运行时工作，通知设置服务恢复原值，再排空必要控制消息并关闭传输；超时会强制收尾。异常关闭也要解除阻塞的读写。
+
+解码器仅在能力查询确认支持时开启低延迟模式，避免 Android 11 等不支持该选项的解码器在配置阶段失败。
 
 远端设置 shell 保存初始旋转和保持唤醒值，并用退出处理恢复设置、删除会话临时文件。连接丢失后依靠 shell EOF 收尾；这不等于保证设备掉电或远端系统异常时仍可执行恢复。视频 / 声音子进程同样由所属 shell 管理，不能用 `pkill scrcpy` 等广泛匹配代替。
 
@@ -85,3 +89,11 @@ flowchart LR
 ## 上游与兼容
 
 server 固定为官方 scrcpy 5.0.1。下载、握手版本、参数、视频头和控制消息必须一起核对，不能只换下载链接。上游与许可见 [第三方说明](../third_party/README.md)，升级流程见 [发布指南](release.md)。
+
+## 无线配对与 TLS
+
+配对按 AOSP v1 协议执行：TLS 1.3 导出密钥与配对秘密组合后交给 SPAKE2，再以 HKDF 派生 AES-128-GCM 密钥，交换固定大小的 PeerInfo。二维码使用 Android Studio 的 `WIFI:T:ADB` 格式，由主控展示、被控端扫描；服务名与秘密每次刷新重新随机生成。
+
+配对与后续 ADB 连接加载同一个 `AdbIdentity`。传统授权公钥备注和配对公钥备注均使用本机名称。TCP 收到 STLS 后回复并在原 Socket 上升级；USB 沿用原始字节流。TLS 使用 ADB 自签名证书规则，不使用网页证书校验；配对秘密通过 TLS exporter 绑定当前连接，后续由远端验证已配对的 RSA 身份。
+
+BoringSSL 的所有内存 BIO 操作与输出记录在同一锁内，阻塞 Socket 读取在锁外，避免视频读取卡住控制写入。关闭时先关 Socket 解除等待，再在锁内释放 SSL。JNI 指针只由传输拥有。配对有 45 秒总超时，取消 / 模式切换 / Activity 销毁关闭连接，过期结果不能更新新页面。mDNS 解析串行处理，服务消失 / 页面关闭停止使用其结果。

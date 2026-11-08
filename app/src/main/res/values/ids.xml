@@ -25,4 +25,15 @@
     <item name="runtime_disconnect" type="id"/>
     <item name="disconnect_cancel" type="id"/>
     <item name="disconnect_confirm" type="id"/>
+    <item name="pair_open" type="id"/>
+    <item name="pair_qr_image" type="id"/>
+    <item name="pair_qr_tab" type="id"/>
+    <item name="pair_code_tab" type="id"/>
+    <item name="pair_host" type="id"/>
+    <item name="pair_port" type="id"/>
+    <item name="pair_code_input" type="id"/>
+    <item name="pair_connect_port" type="id"/>
+    <item name="pair_status" type="id"/>
+    <item name="pair_action" type="id"/>
+    <item name="local_device_name" type="id"/>
 </resources>

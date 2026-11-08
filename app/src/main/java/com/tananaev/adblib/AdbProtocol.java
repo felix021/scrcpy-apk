@@ -18,6 +18,8 @@ public class AdbProtocol {
      */
     public static final int ADB_HEADER_LENGTH = 24;
 
+    public static final int CMD_STLS = 0x534c5453;
+
     public static final int CMD_SYNC = 0x434e5953;
 
     /**

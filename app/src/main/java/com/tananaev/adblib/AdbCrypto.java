@@ -31,6 +31,7 @@ public class AdbCrypto {
      * An RSA keypair encapsulated by the AdbCrypto object
      */
     private KeyPair keyPair;
+    private String deviceName="unknown@unknown";
 
     /**
      * The base 64 conversion interface to use
@@ -252,10 +253,22 @@ public class AdbCrypto {
 
         /* The key is base64 encoded with a user@host suffix and terminated with a NUL */
         keyString.append(base64.encodeToString(convertedKey));
-        keyString.append(" unknown@unknown");
+        keyString.append(' ').append(deviceName);
         keyString.append('\0');
 
         return keyString.toString().getBytes("UTF-8");
+    }
+
+    /** PKCS#8 copy for the owned TLS transport; caller clears it after import. */
+    public byte[] getPrivateKeyEncoded() { return keyPair.getPrivate().getEncoded(); }
+    public void setDeviceName(String name) throws IOException { deviceName=deviceLabel(name); }
+    public static String deviceLabel(String name) throws IOException {
+        String clean=name.replace("\0", "").trim();
+        StringBuilder result=new StringBuilder();
+        clean.codePoints().forEach(cp -> result.appendCodePoint(Character.isWhitespace(cp) || Character.isSpaceChar(cp)?'_':cp));
+        String label=result.toString();
+        if(label.isEmpty() || label.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>120)throw new IOException("Device name must contain 1–120 UTF-8 bytes");
+        return label;
     }
 
     /**

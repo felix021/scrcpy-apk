@@ -64,7 +64,8 @@ public final class MainActivity extends Activity {
     private String connectionType="tcp";
     private LinearLayout networkAddress,usbAddress;
     private TextView networkHint,usbHint;
-    private Button transportPicker,usbPicker;
+    private Button transportPicker,usbPicker,pairButton;
+    private PairingDialog pairingDialog;
     private Profile pendingUsbProfile;
     private PendingIntent usbPermission;
     private Uri usbPermissionUri;
@@ -223,6 +224,14 @@ public final class MainActivity extends Activity {
         host = field(hostGroup, UiText.text(R.string.device_ip_hostname), profile.host, false); host.setHint(UiText.text(R.string.enter_device_address)); host.setHintTextColor(MUTED);
         port = field(portGroup, UiText.text(R.string.adb_port), "" + profile.port, true); add(device, address, -2);
         gap(device, 8);networkHint=label(UiText.text(R.string.allow_usb_debugging_on_the_remote_device_when_connecting_for_the),11,MUTED);add(device,networkHint,-2);
+        pairButton=button(UiText.text(R.string.wireless_pairing),false);pairButton.setId(R.id.pair_open);add(device,pairButton,40);gap(device,8);
+        pairButton.setOnClickListener(v -> {
+            if(pairingDialog!=null)pairingDialog.close();
+            pairingDialog=new PairingDialog(this,host.getText().toString().trim(),(pairedAddress,connectionPort) -> {
+                host.setText(pairedAddress);port.setText(String.valueOf(connectionPort));
+                try{Profile p=readForm();persist(p);connectProfile(p);}catch(Exception e){toast(UiText.error(e));}
+            });
+        });
         usbAddress=column();usbPicker=button("",false);usbPicker.setId(R.id.usb_device);usbPicker.setTextSize(14);usbPicker.setSingleLine(true);usbPicker.setEllipsize(android.text.TextUtils.TruncateAt.END);
         add(usbAddress,usbPicker,44);gap(usbAddress,8);usbHint=label("",11,MUTED);add(usbAddress,usbHint,-2);add(device,usbAddress,-2);
         usbPicker.setOnClickListener(v -> chooseUsbDevice());updateTransportUi();gap(page, 10);
@@ -297,7 +306,7 @@ public final class MainActivity extends Activity {
     private void updateTransportUi(){
         boolean usb=connectionType.equals("usb");
         transportPicker.setText(UiText.text(usb?R.string.usb_adb:R.string.network_adb)+"  ▾");
-        networkAddress.setVisibility(usb?View.GONE:View.VISIBLE);networkHint.setVisibility(usb?View.GONE:View.VISIBLE);usbAddress.setVisibility(usb?View.VISIBLE:View.GONE);
+        pairButton.setVisibility(usb?View.GONE:View.VISIBLE);networkAddress.setVisibility(usb?View.GONE:View.VISIBLE);networkHint.setVisibility(usb?View.GONE:View.VISIBLE);usbAddress.setVisibility(usb?View.VISIBLE:View.GONE);
         java.util.List<UsbDevice> devices=UsbAdb.devices(usbManager);
         if(selectedUsb!=null && devices.stream().noneMatch(d -> d.getDeviceName().equals(selectedUsb.getDeviceName())))selectedUsb=null;
         if(selectedUsb==null){
@@ -388,6 +397,13 @@ public final class MainActivity extends Activity {
     private void showAppSettings(){
         if(mirroring || appSettingsDialog!=null)return;
         LinearLayout body=configPanel(UiText.text(R.string.app_settings),UiText.text(R.string.app_settings_hint));
+        EditText localName=field(body,UiText.text(R.string.local_device_name),AdbIdentity.localName(this),false);localName.setId(R.id.local_device_name);
+        TextView namePreview=label("",11,MUTED);add(body,namePreview,-2);gap(body,12);
+        Runnable saveName=() -> {
+            try{String display=com.tananaev.adblib.AdbCrypto.deviceLabel(localName.getText().toString());namePreview.setText(UiText.format(R.string.pair_name_preview,display));namePreview.setTextColor(MUTED);prefs.edit().putString("localName",localName.getText().toString()).apply();}
+            catch(java.io.IOException e){namePreview.setText(UiText.text(R.string.pair_name_invalid));namePreview.setTextColor(0xffffb6aa);}
+        };
+        localName.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){saveName.run();}public void afterTextChanged(Editable s){}});saveName.run();
         add(body,languageRow(),48);gap(body,20);
         TextView about=label(UiText.text(R.string.about),13,MUTED);about.setTypeface(null,Typeface.BOLD);add(body,about,-2);gap(body,12);
         LinearLayout identity=row();ImageView logo=new ImageView(this);logo.setImageResource(R.mipmap.ic_launcher);
@@ -410,7 +426,7 @@ public final class MainActivity extends Activity {
         LinearLayout content=editorPanel(body,actions);ScrollView scroll=(ScrollView)content.getChildAt(0);
         scroll.setId(R.id.app_settings_scroll);scroll.setScrollbarFadingEnabled(false);scroll.setVerticalFadingEdgeEnabled(true);scroll.setFadingEdgeLength(dp(16));
         Dialog dialog=showConfigDialog(content,dp(440));appSettingsDialog=dialog;
-        dialog.setOnDismissListener(ignored -> {if(appSettingsDialog==dialog)appSettingsDialog=null;});done.setOnClickListener(v -> dialog.dismiss());
+        dialog.setOnDismissListener(ignored -> {if(appSettingsDialog==dialog)appSettingsDialog=null;});done.setOnClickListener(v -> {try{com.tananaev.adblib.AdbCrypto.deviceLabel(localName.getText().toString());dialog.dismiss();}catch(java.io.IOException e){toast(UiText.text(R.string.pair_name_invalid));}});
     }
     private LinearLayout languageRow(){
         LinearLayout language=row();language.addView(label(UiText.text(R.string.interface_language),14,TEXT),new LinearLayout.LayoutParams(0,-2,1));
@@ -1111,7 +1127,7 @@ public final class MainActivity extends Activity {
         errorMessage = error; showForm();
     }
     @Override public void onConfigurationChanged(Configuration c) {
-        super.onConfigurationChanged(c);boolean languageChanged=UiText.refresh();
+        super.onConfigurationChanged(c);if(pairingDialog!=null)pairingDialog.resize();boolean languageChanged=UiText.refresh();
         if(mirroring){remoteInput.cancel();remoteKeyboard.reset();syncOrientation();mirrorBody.post(() -> {updateMirrorLayout();mirrorRoot.requestApplyInsets();});if(languageChanged)refreshMirrorLanguage();}
         else if(languageChanged)refreshFormLanguage();
     }
@@ -1119,7 +1135,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();resumed=true;completeUsbPermission();if(!mirroring && usbPicker!=null)updateTransportUi();}
     @Override protected void onPause(){resumed=false;super.onPause();}
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);usbAttachedIntent(intent);}
-    @Override protected void onDestroy() { if(appSettingsDialog!=null)appSettingsDialog.dismiss();if(choicePopup!=null)choicePopup.dismiss();cancelUsbPermission();unregisterReceiver(usbEvents);if (session != null) session.close(); super.onDestroy(); }
+    @Override protected void onDestroy() { if(pairingDialog!=null)pairingDialog.close(); if(appSettingsDialog!=null)appSettingsDialog.dismiss();if(choicePopup!=null)choicePopup.dismiss();cancelUsbPermission();unregisterReceiver(usbEvents);if (session != null) session.close(); super.onDestroy(); }
     @Override public void onBackPressed() {
         if (mirroring) {
             android.util.Log.d("RemoteGesture", "LOCAL_BACK_FORWARD");

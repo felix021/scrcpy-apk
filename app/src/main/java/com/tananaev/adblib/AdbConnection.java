@@ -22,6 +22,7 @@ public class AdbConnection implements Closeable {
      * communicate with the target device.
      */
     private Closeable transport;
+    private cn.felix021.scrcpy.adb.AdbTlsTransport tlsTransport;
 
     /**
      * The last allocated local stream ID. The ID
@@ -107,7 +108,8 @@ public class AdbConnection implements Closeable {
      */
     public static AdbConnection create(Socket socket, AdbCrypto crypto) throws IOException {
         socket.setTcpNoDelay(true);
-        return create(socket.getInputStream(), socket.getOutputStream(), socket, crypto);
+        cn.felix021.scrcpy.adb.AdbTlsTransport tls=new cn.felix021.scrcpy.adb.AdbTlsTransport(socket);
+        AdbConnection conn=create(tls.input,tls.output,tls,crypto);conn.tlsTransport=tls;return conn;
     }
 
     /** Creates a connection over an owned byte transport, such as Android USB Host. */
@@ -177,6 +179,15 @@ public class AdbConnection implements Closeable {
                                     }
                                 }
 
+                                break;
+
+                            case AdbProtocol.CMD_STLS:
+                                if(conn.connected || conn.tlsTransport==null)throw new IOException("Unexpected ADB TLS upgrade");
+                                synchronized(conn.outputStream){
+                                    conn.outputStream.write(AdbProtocol.generateMessage(AdbProtocol.CMD_STLS,0x01000000,0,null));
+                                    conn.outputStream.flush();
+                                }
+                                conn.tlsTransport.upgrade(conn.crypto);
                                 break;
 
                             case AdbProtocol.CMD_AUTH:

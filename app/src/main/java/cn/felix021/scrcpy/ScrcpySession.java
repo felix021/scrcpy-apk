@@ -76,21 +76,10 @@ final class ScrcpySession {
         worker = new Thread(this::run, "scrcpy-video"); worker.start();
     }
 
-    private static synchronized AdbCrypto identity(Context c) throws Exception {
-        AdbBase64 b64 = b -> Base64.encodeToString(b, Base64.NO_WRAP);
-        try {
-            return AdbCrypto.loadAdbKeyPair(b64, c.getFileStreamPath("adb-private"), c.getFileStreamPath("adb-public"));
-        } catch (Exception e) {
-            AdbCrypto crypto = AdbCrypto.generateAdbKeyPair(b64);
-            crypto.saveAdbKeyPair(c.getFileStreamPath("adb-private"), c.getFileStreamPath("adb-public"));
-            return crypto;
-        }
-    }
-
     private void run() {
         try {
             listener.status(UiText.text(R.string.connecting_to_adb_allow_debugging_on_the_remote_device));
-            AdbCrypto crypto = identity(context);
+            AdbCrypto crypto = AdbIdentity.load(context);
             checkOpen();
             AdbConnection connection;
             if(profile.isUsb()){
@@ -379,7 +368,7 @@ final class ScrcpySession {
             try {
                 MediaFormat format = MediaFormat.createVideoFormat(mime, w, h);
                 format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, Math.max(1024 * 1024, w * h));
-                if (android.os.Build.VERSION.SDK_INT >= 30) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
+                if (android.os.Build.VERSION.SDK_INT >= 30 && codec.getCodecInfo().getCapabilitiesForType(mime).isFeatureSupported(android.media.MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
                 codec.configure(format, surface, null, 0); codec.start();
             } catch (RuntimeException e) { codec.release(); throw e; }
             output = new Thread(() -> {

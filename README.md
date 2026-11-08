@@ -4,6 +4,7 @@
 
 在一台 Android 手机上查看并控制另一台 Android 设备，支持网络 ADB 和数据线 USB ADB。客户端独立完成连接、视频解码和控制，无需电脑中转，也无需在被控端安装常驻应用。
 
+- 无线调试支持二维码 / 六位配对码配对、自动发现端口与 TLS 加密连接，可自定义本机名称。
 - 保存并切换多台设备的完整连接配置，支持 H.264 / H.265 和画质快捷档。
 - 触控、多指、返回 / Home / 最近任务、四边手势，以及六行 QWERTY 虚拟键盘。
 - 远端系统声音 → 本机、本机麦克风 → 远端两个独立开关，默认关闭麦克风转发。
@@ -18,21 +19,21 @@
 
 客户端需要 Android 8.0+；声音播放需要远端 Android 11+，其他能力与远端系统、编码器及厂商权限有关。
 
-**网络连接：** 远端开启传统 ADB TCP（例如先通过已授权的 adb 执行 `adb -s '<target-serial>' tcpip 5555`），在客户端填写可访问的 IP / 主机名和端口，点击连接，首次在远端确认调试授权。暂不支持无线调试的配对码 / TLS 模式。
+**网络连接：** 远端开启传统 ADB TCP（例如先通过已授权的 adb 执行 `adb -s '<target-serial>' tcpip 5555`），在客户端填写可访问的 IP / 主机名和端口，点击连接，首次在远端确认调试授权。也可在远端 Android 11+ 开启「无线调试」，点击应用中的「无线调试配对」，使用二维码或六位配对码；配对成功后连接其无线调试端口。
 
 **USB 连接：** 主控手机开启 USB Host / OTG，被控手机开启 USB 调试，用支持数据传输的线连接。选择「USB ADB」和设备，点击连接，分别确认本机 USB 访问和远端调试授权。USB ADB 已通过用户实机验收。
 
-连接后可以直接触控。键盘图标展开虚拟键盘，齿轮打开远控设置；断开连接需要确认。配置页右上角的齿轮提供应用语言与关于信息。完整操作、声音和系统手势的限制见 [使用说明](docs/usage.md)，遇到问题见 [排障指南](docs/troubleshooting.md)。
+连接后可以直接触控。键盘图标展开虚拟键盘，齿轮打开远控设置；断开连接需要确认。配置页右上角的齿轮提供本机名称、应用语言与关于信息。完整操作、声音和系统手势的限制见 [使用说明](docs/usage.md)，遇到问题见 [排障指南](docs/troubleshooting.md)。
 
 ## 构建
 
-准备 JDK 11 和 Android SDK 31，设置 `JAVA_HOME`、`ANDROID_HOME`，然后运行：
+准备 JDK 11、Python 3.8+、Android SDK 31、NDK 28.0.13004108 和 CMake 3.31.6，设置 `JAVA_HOME`、`ANDROID_HOME`，然后运行：
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-首次构建会下载并校验固定版本的官方 scrcpy server。APK 输出为 `app/build/outputs/apk/debug/app-debug.apk`，包名为 `cn.felix021.scrcpy`。编译产物和本机配置不提交。环境设置与离线构建见 [开发指南](docs/development.md)。
+首次构建会下载并校验固定版本的官方 scrcpy server 与 BoringSSL 源码，编译加密库。APK 输出为 `app/build/outputs/apk/debug/app-debug.apk`，包名为 `cn.felix021.scrcpy`。编译产物和本机配置不提交。环境设置与离线构建见 [开发指南](docs/development.md)。
 
 ## 文档与贡献
 
