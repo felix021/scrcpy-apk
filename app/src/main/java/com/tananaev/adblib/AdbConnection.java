@@ -22,7 +22,7 @@ public class AdbConnection implements Closeable {
      * communicate with the target device.
      */
     private Closeable transport;
-    private cn.felix021.scrcpy.adb.AdbTlsTransport tlsTransport;
+    private cn.ohmyterm.scrcpy.adb.AdbTlsTransport tlsTransport;
 
     /**
      * The last allocated local stream ID. The ID
@@ -108,7 +108,7 @@ public class AdbConnection implements Closeable {
      */
     public static AdbConnection create(Socket socket, AdbCrypto crypto) throws IOException {
         socket.setTcpNoDelay(true);
-        cn.felix021.scrcpy.adb.AdbTlsTransport tls=new cn.felix021.scrcpy.adb.AdbTlsTransport(socket);
+        cn.ohmyterm.scrcpy.adb.AdbTlsTransport tls=new cn.ohmyterm.scrcpy.adb.AdbTlsTransport(socket);
         AdbConnection conn=create(tls.input,tls.output,tls,crypto);conn.tlsTransport=tls;return conn;
     }
 

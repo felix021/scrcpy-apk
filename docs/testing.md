@@ -123,7 +123,7 @@ python3 scripts/verify-wireless.py \
 ```bash
 adb -s '<owned-client-serial>' shell am instrument -w -r \
   -e mode layout -e language en \
-  cn.felix021.scrcpy.test/cn.felix021.scrcpy.WirelessPairingTest
+  cn.ohmyterm.scrcpy.test/cn.ohmyterm.scrcpy.WirelessPairingTest
 ```
 
 语言改为 `zh` 再运行一次。专项实际编辑本机名称，检查竖屏与左右横屏的二维码可解码、底部按钮完整可见；测试截图保存在专用主控的私有文件中，包含临时配对秘密，取出后仅存私有临时目录，不能提交或公开。

@@ -10,7 +10,7 @@
 
 ## 应用版本与构建
 
-1. 在 [app/build.gradle](../app/build.gradle) 中更新 `versionName`，递增 `versionCode`；不要改应用 ID。About 从 `BuildConfig` 读取版本，无需另改文案。
+1. 在 [app/build.gradle](../app/build.gradle) 中更新 `versionName`，递增 `versionCode`；通常不改应用 ID；用户明确要求品牌迁移时，按下文的包名变更规则执行。About 从 `BuildConfig` 读取版本，无需另改文案。
 2. 检查配置兼容、中英文文案和相关主题文档，运行需要的 [验证阶段](testing.md)，按实际结果补充 [版本记录](validation/README.md)。
 3. 构建最终交付 APK，记录对应源码提交、版本与 SHA-256。若验证后还改动应用源码，应重新构建并补做受影响检查。
 
@@ -20,7 +20,9 @@ python3 scripts/check-docs.py
 sha256sum app/build/outputs/apk/release/app-release.apk
 ```
 
-自 1.0.0 起，GitHub Release 交付非调试的 release 构建，输出为 `app/build/outputs/apk/release/app-release.apk`。为保持覆盖升级，release 构建显式使用与早期 APK 相同的本机 debug keystore；这是签名身份的延续，应用本身不启用调试。未引入独立商店签名，不能将此证书称为应用商店发布密钥。包名保持 `cn.felix021.scrcpy`。
+自 1.0.0 起，GitHub Release 交付非调试的 release 构建，输出为 `app/build/outputs/apk/release/app-release.apk`。为保持覆盖升级，release 构建显式使用与早期 APK 相同的本机 debug keystore；这是签名身份的延续，应用本身不启用调试。未引入独立商店签名，不能将此证书称为应用商店发布密钥。当前包名为 `cn.ohmyterm.scrcpy`。
+
+2026-11 的组织迁移按用户要求将包名从 `cn.felix021.scrcpy` 改为 `cn.ohmyterm.scrcpy`（Android 包名不能包含连字符）。新旧包是独立应用，可并存；即使证书相同，也不能覆盖升级，连接配置和 ADB 配对身份不会自动迁移。不要卸载用户旧包来掩盖这一差异。源码包、Manifest、JNI 符号、测试与远端麦克风入口必须一起更新；历史 Release 和验证记录保留当时的包名。iOS 仍固定使用旧版麦克风 DEX，其类名随所选资源版本变化，不能只改调用端。
 
 ## 签名与覆盖安装
 

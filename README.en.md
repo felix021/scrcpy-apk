@@ -11,9 +11,11 @@ View and control an Android device from another Android phone over network ADB o
 - Portrait and landscape layouts, remote orientation sync, manual rotation, view-only mode and keep-awake settings.
 - A consistent dark UI, Chinese / English with a system-language option, and app settings with version and repository information.
 
+The application ID is now `cn.ohmyterm.scrcpy`. Earlier `cn.felix021.scrcpy` installs are separate apps; profiles and ADB identities do not migrate automatically. Configure and authorize the new app again.
+
 ## Download and install
 
-Download the APK from [GitHub Releases](https://github.com/felix021/scrcpy-apk/releases/latest) to install or upgrade. Each release includes a SHA-256 checksum file. The APK uses a non-debuggable release build and retains the signing certificate used by earlier versions.
+Download the APK from [GitHub Releases](https://github.com/moteng-network/scrcpy-apk/releases/latest) to install. In-place upgrades require the same application ID; earlier IDs need the setup described above. Each release includes a SHA-256 checksum file. The APK uses a non-debuggable release build and retains the signing certificate used by earlier versions.
 
 ## Quick start
 
@@ -33,7 +35,7 @@ Install JDK 11, Python 3.8+, Android SDK 31, NDK 28.0.13004108 and CMake 3.31.6,
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-The first build downloads and verifies a pinned official scrcpy server and BoringSSL source, then builds the crypto libraries. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`; the application ID is `cn.felix021.scrcpy`. Build outputs and local configuration are excluded from Git. See the [development guide](docs/development.md) for setup and offline builds.
+The first build downloads and verifies a pinned official scrcpy server and BoringSSL source, then builds the crypto libraries. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`; the application ID is `cn.ohmyterm.scrcpy`. Build outputs and local configuration are excluded from Git. See the [development guide](docs/development.md) for setup and offline builds.
 
 ## Documentation and contributing
 

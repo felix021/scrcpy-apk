@@ -99,7 +99,7 @@ try:
             forward(pairing_port())
         command=['am','instrument','-w','-r','-e','mode',mode,'-e','host',a.host,'-e','pairPort',str(a.pair_forward),'-e','connectPort',str(a.connect_forward),'-e','bridge',f'http://{a.host}:{a.bridge_port}']
         if code is not None:command+=['-e','code',code]
-        command+=['cn.felix021.scrcpy.test/cn.felix021.scrcpy.WirelessPairingTest']
+        command+=['cn.ohmyterm.scrcpy.test/cn.ohmyterm.scrcpy.WirelessPairingTest']
         output=adb(a.client,'shell',*command)
         (a.output/(mode+'.txt')).write_text(output)
         if 'PASS:' not in output or 'FAIL:' in output:

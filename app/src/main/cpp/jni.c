@@ -7,7 +7,7 @@
 #include <openssl/mem.h>
 #include <openssl/rsa.h>
 #include "AdbCrypto.h"
-#define JNI(name) Java_cn_felix021_scrcpy_adb_NativeCrypto_##name
+#define JNI(name) Java_cn_ohmyterm_scrcpy_adb_NativeCrypto_##name
 #define TLS(h) ((sc_tls *)(intptr_t)(h))
 #define PAIR(h) ((sc_pair *)(intptr_t)(h))
 static void fail(JNIEnv *e, const char *message) { jclass c=(*e)->FindClass(e,"java/io/IOException"); if(c)(*e)->ThrowNew(e,c,message); }

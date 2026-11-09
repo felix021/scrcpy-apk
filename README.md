@@ -11,9 +11,11 @@
 - 竖屏与横屏布局、远端方向同步、手动旋转、仅观看和保持唤醒。
 - 深色设置界面，支持中文 / 英文及跟随系统语言，内含关于、版本和代码仓库入口。
 
+包名现为 `cn.ohmyterm.scrcpy`。早期 `cn.felix021.scrcpy` 是独立应用，旧配置和配对身份不会自动迁移；安装新版后需重新配置和授权。
+
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/felix021/scrcpy-apk/releases/latest) 下载 APK，直接安装或覆盖升级。Release 同时提供 SHA-256 校验文件；安装包使用非调试构建，并沿用早期版本的签名证书。
+从 [GitHub Releases](https://github.com/moteng-network/scrcpy-apk/releases/latest) 下载 APK。同一包名可覆盖升级；旧包名用户按上文重新配置。Release 同时提供 SHA-256 校验文件；安装包使用非调试构建，并沿用早期版本的签名证书。
 
 ## 快速上手
 
@@ -33,7 +35,7 @@
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-首次构建会下载并校验固定版本的官方 scrcpy server 与 BoringSSL 源码，编译加密库。APK 输出为 `app/build/outputs/apk/debug/app-debug.apk`，包名为 `cn.felix021.scrcpy`。编译产物和本机配置不提交。环境设置与离线构建见 [开发指南](docs/development.md)。
+首次构建会下载并校验固定版本的官方 scrcpy server 与 BoringSSL 源码，编译加密库。APK 输出为 `app/build/outputs/apk/debug/app-debug.apk`，包名为 `cn.ohmyterm.scrcpy`。编译产物和本机配置不提交。环境设置与离线构建见 [开发指南](docs/development.md)。
 
 ## 文档与贡献
 

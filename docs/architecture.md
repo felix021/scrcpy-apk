@@ -25,7 +25,7 @@ flowchart LR
 
 ## 代码地图
 
-以下类均在 [应用源码目录](../app/src/main/java/cn/felix021/scrcpy/) 下；ADB 库单独列出。
+以下类均在 [应用源码目录](../app/src/main/java/cn/ohmyterm/scrcpy/) 下；ADB 库单独列出。
 
 | 文件 / 模块 | 职责 |
 | --- | --- |
@@ -60,7 +60,7 @@ flowchart LR
 
 远端设置 shell 保存初始旋转和保持唤醒值，并用退出处理恢复设置、删除会话临时文件。连接丢失后依靠 shell EOF 收尾；这不等于保证设备掉电或远端系统异常时仍可执行恢复。视频 / 声音子进程同样由所属 shell 管理，不能用 `pkill scrcpy` 等广泛匹配代替。
 
-具体实现：[ScrcpySession](../app/src/main/java/cn/felix021/scrcpy/ScrcpySession.java)、[远端设置](../app/src/main/java/cn/felix021/scrcpy/RemoteDeviceSettings.java)、[进程归属](../app/src/main/java/cn/felix021/scrcpy/RemoteServerProcess.java)。
+具体实现：[ScrcpySession](../app/src/main/java/cn/ohmyterm/scrcpy/ScrcpySession.java)、[远端设置](../app/src/main/java/cn/ohmyterm/scrcpy/RemoteDeviceSettings.java)、[进程归属](../app/src/main/java/cn/ohmyterm/scrcpy/RemoteServerProcess.java)。
 
 ## 修改时要保留的约束
 

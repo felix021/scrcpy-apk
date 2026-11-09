@@ -5,18 +5,18 @@ android {
     ndkVersion '28.0.13004108'
     externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.31.6' } }
     defaultConfig {
-        applicationId 'cn.felix021.scrcpy'
-        testInstrumentationRunner 'cn.felix021.scrcpy.WirelessPairingTest'
+        applicationId 'cn.ohmyterm.scrcpy'
+        testInstrumentationRunner 'cn.ohmyterm.scrcpy.WirelessPairingTest'
         minSdkVersion 26
         targetSdkVersion 31
         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static'; cppFlags '-std=c++17' } }
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86' }
-        versionCode 14
-        versionName '1.1.0'
+        versionCode 15
+        versionName '1.1.1'
     }
     buildTypes {
         release {
-            // Preserve upgrades from existing installs; this is not a store signing key.
+            // Retain the existing signing identity; this is not a store signing key.
             signingConfig signingConfigs.debug
         }
     }

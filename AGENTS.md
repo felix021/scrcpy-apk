@@ -1,6 +1,6 @@
 # AI 协作入口
 
-本项目是 Android 控制 Android 的独立客户端，支持传统 / TLS 网络 ADB、无线配对和 USB Host ADB。主应用包名为 `cn.felix021.scrcpy`。先读本文件，再按任务打开需要的主题文档；不必一开始读取全部历史记录。
+本项目是 Android 控制 Android 的独立客户端，支持传统 / TLS 网络 ADB、无线配对和 USB Host ADB。主应用包名为 `cn.ohmyterm.scrcpy`。先读本文件，再按任务打开需要的主题文档；不必一开始读取全部历史记录。
 
 ## 从任务定位上下文
 
@@ -16,7 +16,7 @@
 | 交付 APK、签名、依赖升级 | [发布指南](docs/release.md)、[第三方说明](third_party/README.md) | 构建配置、下载脚本、许可文件 |
 | 更新文档、查历史证据 | [文档索引与维护规则](docs/README.md)、[验证记录索引](docs/validation/README.md) | 当前主题文档与对应版本记录 |
 
-应用 Java 文件位于 `app/src/main/java/cn/felix021/scrcpy/`，ADB 库位于 `app/src/main/java/com/tananaev/adblib/`。文件用途详见架构文档。
+应用 Java 文件位于 `app/src/main/java/cn/ohmyterm/scrcpy/`，ADB 库位于 `app/src/main/java/com/tananaev/adblib/`。文件用途详见架构文档。
 
 ## 开工与修改规则
 

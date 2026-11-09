@@ -2,7 +2,7 @@ apply plugin: 'com.android.application'
 android {
     compileSdkVersion 31
     defaultConfig {
-        applicationId 'cn.felix021.scrcpy.probe'
+        applicationId 'cn.ohmyterm.scrcpy.probe'
         minSdkVersion 26
         targetSdkVersion 31
         versionCode 1

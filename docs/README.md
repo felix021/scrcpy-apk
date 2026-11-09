@@ -23,7 +23,7 @@
 | 应用 ID、版本、SDK 要求 | [app/build.gradle](../app/build.gradle)、[Manifest](../app/src/main/AndroidManifest.xml) |
 | 构建工具版本 | [根构建文件](../build.gradle)、[Gradle wrapper](../gradle/wrapper/gradle-wrapper.properties) |
 | scrcpy server 下载版本与 SHA-256 | [prepare-server.sh](../scripts/prepare-server.sh)，会话启动参数还需与源码核对 |
-| 参数默认值、校验和数据兼容 | [Profile.java](../app/src/main/java/cn/felix021/scrcpy/Profile.java) |
+| 参数默认值、校验和数据兼容 | [Profile.java](../app/src/main/java/cn/ohmyterm/scrcpy/Profile.java) |
 | 当前产品行为 | 实现源码与主题文档；不一致时核对代码，并在同一改动中修正文档 |
 | 曾经完成的验证 | 对应版本的记录，以及当次退出状态、结果文件、日志和截图 |
 

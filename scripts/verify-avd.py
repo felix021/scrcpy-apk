@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 client_apk = a.apk.resolve() if a.apk else ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
 if not client_apk.is_file():
     P.error(f'Client APK not found: {client_apk}')
-PKG = 'cn.felix021.scrcpy'
+PKG = 'cn.ohmyterm.scrcpy'
 PROBE = PKG + '.probe'
 results = []
 (a.output / "result.json").write_text("[]")
@@ -1017,7 +1017,7 @@ def verify_app_settings():
     assert find(rid='app_version',root=root).get('text')==f'版本 {version} ({code})'
     assert find(text='开源许可 · GPL-3.0',root=root) is not None
     link=scroll_to('repository_link')
-    assert link.get('content-desc')=='代码仓库 · https://github.com/felix021/scrcpy-apk'
+    assert link.get('content-desc')=='代码仓库 · https://github.com/moteng-network/scrcpy-apk'
     screenshot('81-app-settings-zh');click(find(rid='app_settings_done'))
     edit('设备 IP / 主机名','draft-phone.example');edit('最长边 · px','1')
     form_language('English')
@@ -1045,7 +1045,7 @@ def verify_app_settings():
     shell(a.client,'settings','put','system','user_rotation',0);time.sleep(.6)
     link=scroll_to('repository_link');click(link)
     activities=shell(a.client,'dumpsys','activity','activities')
-    assert 'android.intent.action.VIEW' in activities and 'https://github.com/felix021/scrcpy-apk' in activities
+    assert 'android.intent.action.VIEW' in activities and 'https://github.com/moteng-network/scrcpy-apk' in activities
     shell(a.client,'am','start','-n',PKG+'/.MainActivity');time.sleep(.5)
     click(find(rid='app_settings_done'));open_settings();shell(a.client,'input','keyevent','KEYCODE_BACK')
     assert find(rid='app_settings_done') is None and find(rid='app_settings') is not None

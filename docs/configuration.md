@@ -6,8 +6,8 @@
 
 | 内容 | 位置 / 约定 |
 | --- | --- |
-| 主应用 ID | `cn.felix021.scrcpy`，来源：[app/build.gradle](../app/build.gradle) |
-| 一次性验证应用 ID | `cn.felix021.scrcpy.probe`，来源：[probe/build.gradle](../validation/probe/build.gradle) |
+| 主应用 ID | `cn.ohmyterm.scrcpy`，来源：[app/build.gradle](../app/build.gradle) |
+| 一次性验证应用 ID | `cn.ohmyterm.scrcpy.probe`，来源：[probe/build.gradle](../validation/probe/build.gradle) |
 | 连接数据 | 应用私有 SharedPreferences `connections` |
 | `last` | 最近使用配置的 JSON 对象字符串 |
 | `profiles` | 已保存完整配置的 JSON 数组字符串 |
@@ -17,7 +17,7 @@
 
 应用关闭系统数据备份。覆盖升级保留数据和 ADB 身份；卸载 / 清除数据会丢失配置和密钥。不要把应用私有数据、真实地址、USB 序列号或密钥写入仓库与公开证据。
 
-实现依据：[Profile](../app/src/main/java/cn/felix021/scrcpy/Profile.java)、[MainActivity](../app/src/main/java/cn/felix021/scrcpy/MainActivity.java)、[UiText](../app/src/main/java/cn/felix021/scrcpy/UiText.java)、[Manifest](../app/src/main/AndroidManifest.xml)。
+实现依据：[Profile](../app/src/main/java/cn/ohmyterm/scrcpy/Profile.java)、[MainActivity](../app/src/main/java/cn/ohmyterm/scrcpy/MainActivity.java)、[UiText](../app/src/main/java/cn/ohmyterm/scrcpy/UiText.java)、[Manifest](../app/src/main/AndroidManifest.xml)。
 
 ## Profile 字段
 
