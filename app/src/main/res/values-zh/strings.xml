@@ -167,8 +167,9 @@
     <string name="app_description">通过网络或 USB 控制另一台 Android 设备。</string>
     <string name="app_version">版本 %1$s (%2$d)</string>
     <string name="app_license">开源许可 · GPL-3.0</string>
+    <string name="project_homepage">项目主页</string>
     <string name="code_repository">代码仓库</string>
-    <string name="no_browser_available">未找到浏览器，请在浏览器中打开代码仓库地址。</string>
+    <string name="no_browser_available">未找到浏览器，请在浏览器中打开链接地址。</string>
     <string name="wireless_pairing">无线调试配对</string>
     <string name="pairing_intro">远端需为 Android 11 或更新版本，并开启开发者选项中的「无线调试」。两台设备需在可互访的网络中。</string>
     <string name="local_device_name">本机名称</string>

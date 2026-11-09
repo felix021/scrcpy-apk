@@ -3,6 +3,7 @@
     <item name="app_settings_done" type="id"/>
     <item name="app_settings_scroll" type="id"/>
     <item name="app_version" type="id"/>
+    <item name="homepage_link" type="id"/>
     <item name="repository_link" type="id"/>
 
     <item name="transport_picker" type="id"/>

@@ -1,6 +1,6 @@
 # scrcpy APK
 
-[简体中文](README.md) · **English**
+[简体中文](README.md) · [Website](https://scrcpy.oh-my-term.cn/en/) · **English**
 
 View and control an Android device from another Android phone over network ADB or a USB cable. The client handles the connection, video decoding and input directly, with no computer relay or permanently installed app on the remote device.
 
@@ -9,7 +9,7 @@ View and control an Android device from another Android phone over network ADB o
 - Touch, multitouch, Back / Home / Recents, edge gestures and a six-row QWERTY keyboard.
 - Independent switches for remote system audio → local playback and local microphone → remote input. Microphone forwarding is off by default.
 - Portrait and landscape layouts, remote orientation sync, manual rotation, view-only mode and keep-awake settings.
-- A consistent dark UI, Chinese / English with a system-language option, and app settings with version and repository information.
+- A consistent dark UI, Chinese / English with a system-language option, and app settings with version, project website and repository information.
 
 The application ID is now `cn.ohmyterm.scrcpy`. Earlier `cn.felix021.scrcpy` installs are separate apps; profiles and ADB identities do not migrate automatically. Configure and authorize the new app again.
 

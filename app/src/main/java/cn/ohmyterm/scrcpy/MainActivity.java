@@ -394,6 +394,17 @@ public final class MainActivity extends Activity {
         }
         popup.showAsDropDown(anchor,0,dp(5),Gravity.END);
     }
+    private LinearLayout settingsLink(int title,String url,int id){
+        LinearLayout link=column();link.setId(id);link.setPadding(dp(14),dp(12),dp(14),dp(12));link.setBackground(background(BG,14));
+        link.setContentDescription(UiText.text(title)+" · "+url);link.setFocusable(true);
+        add(link,label(UiText.text(title)+"  ↗",14,ACCENT),-2);gap(link,4);
+        TextView address=label(url,11,MUTED);address.setSingleLine(true);address.setEllipsize(android.text.TextUtils.TruncateAt.END);add(link,address,-2);
+        link.setOnClickListener(v -> {
+            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}
+            catch(android.content.ActivityNotFoundException e){toast(UiText.text(R.string.no_browser_available));}
+        });
+        return link;
+    }
     private void showAppSettings(){
         if(mirroring || appSettingsDialog!=null)return;
         LinearLayout body=configPanel(UiText.text(R.string.app_settings),UiText.text(R.string.app_settings_hint));
@@ -413,15 +424,8 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams nameParams=new LinearLayout.LayoutParams(0,-2,1);nameParams.setMarginStart(dp(12));identity.addView(name,nameParams);add(body,identity,-2);gap(body,16);
         TextView version=label(UiText.format(R.string.app_version,BuildConfig.VERSION_NAME,BuildConfig.VERSION_CODE),13,TEXT);version.setId(R.id.app_version);
         add(body,version,-2);gap(body,8);add(body,label(UiText.text(R.string.app_license),12,MUTED),-2);gap(body,18);
-        String repository="https://github.com/moteng-network/scrcpy-apk";
-        LinearLayout link=column();link.setId(R.id.repository_link);link.setPadding(dp(14),dp(12),dp(14),dp(12));link.setBackground(background(BG,14));
-        link.setContentDescription(UiText.text(R.string.code_repository)+" · "+repository);link.setFocusable(true);
-        add(link,label(UiText.text(R.string.code_repository)+"  ↗",14,ACCENT),-2);gap(link,4);
-        TextView address=label(repository,11,MUTED);address.setSingleLine(true);address.setEllipsize(android.text.TextUtils.TruncateAt.END);add(link,address,-2);add(body,link,-2);
-        link.setOnClickListener(v -> {
-            try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(repository)));}
-            catch(android.content.ActivityNotFoundException e){toast(UiText.text(R.string.no_browser_available));}
-        });
+        add(body,settingsLink(R.string.project_homepage,"https://scrcpy.oh-my-term.cn/",R.id.homepage_link),-2);gap(body,12);
+        add(body,settingsLink(R.string.code_repository,"https://github.com/moteng-network/scrcpy-apk",R.id.repository_link),-2);
         LinearLayout actions=row();Button done=button(UiText.text(R.string.done),true);done.setId(R.id.app_settings_done);configAction(actions,done,1,true);
         LinearLayout content=editorPanel(body,actions);ScrollView scroll=(ScrollView)content.getChildAt(0);
         scroll.setId(R.id.app_settings_scroll);scroll.setScrollbarFadingEnabled(false);scroll.setVerticalFadingEdgeEnabled(true);scroll.setFadingEdgeLength(dp(16));

@@ -167,8 +167,9 @@
     <string name="app_description">Control an Android device over network or USB.</string>
     <string name="app_version">Version %1$s (%2$d)</string>
     <string name="app_license">License · GPL-3.0</string>
+    <string name="project_homepage">Project website</string>
     <string name="code_repository">Code repository</string>
-    <string name="no_browser_available">No browser available. Please open the repository address in a browser.</string>
+    <string name="no_browser_available">No browser available. Please open the address in a browser.</string>
     <string name="wireless_pairing">Pair wireless debugging</string>
     <string name="pairing_intro">On Android 11 or later, enable Wireless debugging in Developer options. Both devices must be reachable over the network.</string>
     <string name="local_device_name">This device’s name</string>
