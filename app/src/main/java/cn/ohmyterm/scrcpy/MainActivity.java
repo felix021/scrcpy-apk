@@ -102,6 +102,7 @@ public final class MainActivity extends Activity {
     private ImageButton keyboardToggle;
     private boolean keyboardVisible;
     private Dialog disconnectDialog, textDialog;
+    private android.window.OnBackInvokedCallback remoteBackCallback;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -167,6 +168,7 @@ public final class MainActivity extends Activity {
     private void showForm() {
         cancelUsbPermission();selectedUsb=null;
         mirroring = false; generation++;
+        updateSystemBack();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (Build.VERSION.SDK_INT >= 28) {
             WindowManager.LayoutParams attrs = getWindow().getAttributes();
@@ -181,6 +183,14 @@ public final class MainActivity extends Activity {
         }
         profile = lastProfile();
         LinearLayout root = column(); root.setBackgroundColor(BG); setContentView(root);
+        if (Build.VERSION.SDK_INT >= 35) {
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
         FrameLayout scrollArea=new FrameLayout(this);root.addView(scrollArea,new LinearLayout.LayoutParams(-1,0,1));
         ScrollView scroll = new ScrollView(this);formScroll=scroll;scroll.setId(R.id.form_scroll);scroll.setFillViewport(false);
         scroll.setScrollbarFadingEnabled(false);scrollArea.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
@@ -816,6 +826,7 @@ public final class MainActivity extends Activity {
     private void showMirror(Profile p) {
         activeUsb=p.isUsb()?selectedUsb:null;final UsbDevice usb=activeUsb;
         profile = p;connectedDevice=null; keyboardVisible = false; mirroring = true; final int token = ++generation; videoWidth = videoHeight = 0;
+        updateSystemBack();
         View focus = getCurrentFocus();
         if (focus != null) ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
@@ -1145,6 +1156,16 @@ public final class MainActivity extends Activity {
             android.util.Log.d("RemoteGesture", "LOCAL_BACK_FORWARD");
             if (session != null) session.key(4);
         } else super.onBackPressed();
+    }
+    private void updateSystemBack() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (mirroring && remoteBackCallback == null) {
+            remoteBackCallback = this::onBackPressed;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, remoteBackCallback);
+        } else if (!mirroring && remoteBackCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(remoteBackCallback);
+            remoteBackCallback = null;
+        }
     }
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
 }

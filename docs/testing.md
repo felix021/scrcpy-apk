@@ -127,3 +127,13 @@ adb -s '<owned-client-serial>' shell am instrument -w -r \
 ```
 
 语言改为 `zh` 再运行一次。专项实际编辑本机名称，检查竖屏与左右横屏的二维码可解码、底部按钮完整可见；测试截图保存在专用主控的私有文件中，包含临时配对秘密，取出后仅存私有临时目录，不能提交或公开。
+
+## Google Play 构建验证
+
+使用 Play 上传证书验证时，设置私有签名环境并给 `verify-wireless.py` 传 `--variant play`，脚本会构建证书匹配的 `PlayAndroidTest`；默认仍为 debug。直接构建可用 `-PscrcpyTestBuildType=play :app:assemblePlayAndroidTest`。测试 APK 使用 `adb install -t` 安装，不能把测试 APK 当作商店交付包。
+
+Android 16 专项检查配置页避开强制边到边的系统栏，并在远控时通过新系统返回回调把 Back 发到远端。无线回归会先把目标放在 Settings 首页，然后通过本机系统 Back 验证远端回到桌面且连接保持；不能只检查本机按钮外观。
+
+配对 fixture 需要在明确归属本任务的可调试目标 AVD 上执行 `adb root`；脚本会先检查 UID，不能用于个人真机。首次全屏提示由测试只针对 System UI 的「Got it」按钮关闭。配对完成后才重置远端 Settings 首页，避免系统配对广播改变返回测试的起点。
+
+`--screenshots --modes code` 可把实际配置页、远控、键盘和运行时设置截图保存到主控 App 的私有文件 `store-en-*.png`；提取到仓库外并人工检查后才用作商店素材。失败截图也仅保存在专用主控，禁止把二维码或配对秘密公开。

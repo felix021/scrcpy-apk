@@ -1,23 +1,40 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 31
+    namespace 'cn.ohmyterm.scrcpy'
+    compileSdkVersion 36
+    buildFeatures { buildConfig true }
+    testBuildType providers.gradleProperty('scrcpyTestBuildType').getOrElse('debug')
     ndkVersion '28.0.13004108'
     externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.31.6' } }
     defaultConfig {
         applicationId 'cn.ohmyterm.scrcpy'
         testInstrumentationRunner 'cn.ohmyterm.scrcpy.WirelessPairingTest'
         minSdkVersion 26
-        targetSdkVersion 31
+        targetSdkVersion 36
         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static'; cppFlags '-std=c++17' } }
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86' }
-        versionCode 16
-        versionName '1.1.2'
+        versionCode 17
+        versionName '1.2.0'
+    }
+    signingConfigs {
+        play {
+            def path = System.getenv('SCRCPY_PLAY_KEYSTORE')
+            storeFile path ? file(path) : null
+            storePassword System.getenv('SCRCPY_PLAY_STORE_PASSWORD')
+            keyAlias System.getenv('SCRCPY_PLAY_KEY_ALIAS')
+            keyPassword System.getenv('SCRCPY_PLAY_KEY_PASSWORD')
+        }
     }
     buildTypes {
         release {
             // Retain the existing signing identity; this is not a store signing key.
             signingConfig signingConfigs.debug
+        }
+        play {
+            initWith release
+            signingConfig signingConfigs.play
+            matchingFallbacks = ['release']
         }
     }
     compileOptions {
@@ -41,6 +58,14 @@ task prepareCrypto(type: Exec) {
 }
 preBuild.dependsOn prepareCrypto
 tasks.configureEach { if (name.startsWith('configureCMake') || name.startsWith('generateJsonModel')) dependsOn prepareCrypto }
+tasks.register('validatePlaySigning') {
+    doLast {
+        ['SCRCPY_PLAY_KEYSTORE', 'SCRCPY_PLAY_STORE_PASSWORD', 'SCRCPY_PLAY_KEY_ALIAS', 'SCRCPY_PLAY_KEY_PASSWORD'].each {
+            if (!System.getenv(it)) throw new GradleException("Missing ${it}; Play builds require a dedicated upload key.")
+        }
+    }
+}
+tasks.configureEach { if (name == 'prePlayBuild') dependsOn 'validatePlaySigning' }
 
 dependencies {
     implementation 'com.google.zxing:core:3.5.3'

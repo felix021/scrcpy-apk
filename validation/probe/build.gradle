@@ -1,5 +1,6 @@
 apply plugin: 'com.android.application'
 android {
+    namespace 'cn.ohmyterm.scrcpy.probe'
     compileSdkVersion 31
     defaultConfig {
         applicationId 'cn.ohmyterm.scrcpy.probe'

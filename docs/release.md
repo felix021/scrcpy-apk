@@ -20,7 +20,7 @@ python3 scripts/check-docs.py
 sha256sum app/build/outputs/apk/release/app-release.apk
 ```
 
-自 1.0.0 起，GitHub Release 交付非调试的 release 构建，输出为 `app/build/outputs/apk/release/app-release.apk`。为保持覆盖升级，release 构建显式使用与早期 APK 相同的本机 debug keystore；这是签名身份的延续，应用本身不启用调试。未引入独立商店签名，不能将此证书称为应用商店发布密钥。当前包名为 `cn.ohmyterm.scrcpy`。
+自 1.0.0 起，GitHub Release 交付非调试的 release 构建，输出为 `app/build/outputs/apk/release/app-release.apk`。为保持覆盖升级，release 构建显式使用与早期 APK 相同的本机 debug keystore；这是签名身份的延续，应用本身不启用调试。这份历史证书不用于 Google Play 上传；商店包通过独立的 `play` 构建类型和上传密钥生成。当前包名为 `cn.ohmyterm.scrcpy`。
 
 2026-11 的组织迁移按用户要求将包名从 `cn.felix021.scrcpy` 改为 `cn.ohmyterm.scrcpy`（Android 包名不能包含连字符）。新旧包是独立应用，可并存；即使证书相同，也不能覆盖升级，连接配置和 ADB 配对身份不会自动迁移。不要卸载用户旧包来掩盖这一差异。源码包、Manifest、JNI 符号、测试与远端麦克风入口必须一起更新；历史 Release 和验证记录保留当时的包名。iOS 仍固定使用旧版麦克风 DEX，其类名随所选资源版本变化，不能只改调用端。
 
@@ -55,3 +55,7 @@ Gradle wrapper JAR 是构建工具，可保留在 Git；下载的 server、编�
 - GitHub Release 使用与应用版本对应的 tag，上传可安装的 `scrcpy-apk-<version>.apk` 及 `SHA256SUMS`，发布为正式版并设置 latest；APK 只作为 Release asset，不进入 Git。
 - 从实际下载 URL 重新取回文件，比较哈希；验证链接可访问及文件完整，不能只确认本地拷贝成功。截图另检查隐私后发布，不放入源码仓库。
 - 交付说明包含版本、下载入口、行为变化、验证结果及实际限制；保留原始证据在仓库外，报告使用占位环境信息。
+
+## Google Play
+
+商店渠道使用 `:app:bundlePlay`，私有上传身份通过环境变量提供；没有凭据时拒绝签名，不回退到 debug key。GitHub 的 `release` 构建保留原有签名。两个渠道同包名但签名不同，不能直接覆盖安装；不要自动卸载用户旧包。完整流程见 [Google Play 上架](google-play.md)。

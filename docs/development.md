@@ -6,9 +6,9 @@
 
 | 工具 | 项目使用的版本 / 用途 |
 | --- | --- |
-| JDK | 11；Java 源码目标兼容级别为 8 |
-| Android SDK | compile / target SDK 31，min SDK 26；构建工具可使用 30.0.2 |
-| Gradle / Android Gradle Plugin | wrapper 7.0.2 / AGP 7.0.0，由仓库固定 |
+| JDK | 17+；本轮使用 21，Java 源码目标兼容级别为 8 |
+| Android SDK | compile / target SDK 36，min SDK 26；构建工具 35.0.0+ |
+| Gradle / Android Gradle Plugin | wrapper 8.14.3 / AGP 8.10.1，由仓库固定 |
 | Python 3.8+ | 加密源码下载、文档检查与 AVD 验证脚本 |
 | NDK / CMake | 28.0.13004108 / 3.31.6；BoringSSL 与 JNI，四种 ABI |
 | Bash、curl、sha256sum | 下载并校验官方 server |
@@ -30,7 +30,7 @@ git worktree add -b '<task-branch>' "$HOME/worktrees/scrcpy-apk/<task>"
 配置已安装的工具路径：
 
 ```bash
-export JAVA_HOME=/path/to/jdk-11
+export JAVA_HOME=/path/to/jdk-21
 export ANDROID_HOME=/path/to/android-sdk
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ```
@@ -40,7 +40,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 缺少 SDK 组件时，通过 Android SDK Manager 安装；命令行示例：
 
 ```bash
-sdkmanager "platforms;android-31" "build-tools;30.0.2" "platform-tools" "ndk;28.0.13004108" "cmake;3.31.6"
+sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools" "ndk;28.0.13004108" "cmake;3.31.6"
 ```
 
 运行：

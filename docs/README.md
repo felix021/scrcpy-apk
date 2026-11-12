@@ -11,6 +11,7 @@
 | [配置与数据](configuration.md) | 默认值、JSON 字段、配置身份、语言和权限如何保存与兼容？ |
 | [开发指南](development.md) | 如何建立 worktree、配置环境、构建和修改资源？ |
 | [验证指南](testing.md) | 按改动运行哪些检查？如何用两台 AVD 验证并收集证据？ |
+| [Google Play 上架](google-play.md) | 商店包、签名渠道、商店资料与首次发行的网页步骤 |
 | [发布指南](release.md) | 如何升级版本、保持签名、检查依赖和交付 APK？ |
 | [排障指南](troubleshooting.md) | 连接、USB、视频、声音和验证异常先检查什么？ |
 | [验证记录索引](validation/README.md) | 历次版本实际验证了什么？哪些结论来自用户实机反馈？ |

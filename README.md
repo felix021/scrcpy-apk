@@ -17,6 +17,8 @@
 
 从 [GitHub Releases](https://github.com/moteng-network/scrcpy-apk/releases/latest) 下载 APK。同一包名可覆盖升级；旧包名用户按上文重新配置。Release 同时提供 SHA-256 校验文件；安装包使用非调试构建，并沿用早期版本的签名证书。
 
+Google Play 版本正在准备，计划一次购买 US$0.99。商店签名与 GitHub APK 不同，不同证书签名的安装不能互相覆盖升级，详见 [Google Play 指南](docs/google-play.md)。
+
 ## 快速上手
 
 客户端需要 Android 8.0+；声音播放需要远端 Android 11+，其他能力与远端系统、编码器及厂商权限有关。
@@ -29,7 +31,7 @@
 
 ## 构建
 
-准备 JDK 11、Python 3.8+、Android SDK 31、NDK 28.0.13004108 和 CMake 3.31.6，设置 `JAVA_HOME`、`ANDROID_HOME`，然后运行：
+准备 JDK 17+（本轮使用 21）、Python 3.8+、Android SDK 36、NDK 28.0.13004108 和 CMake 3.31.6，设置 `JAVA_HOME`、`ANDROID_HOME`，然后运行：
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug

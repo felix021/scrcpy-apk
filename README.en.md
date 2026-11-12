@@ -17,6 +17,8 @@ The application ID is now `cn.ohmyterm.scrcpy`. Earlier `cn.felix021.scrcpy` ins
 
 Download the APK from [GitHub Releases](https://github.com/moteng-network/scrcpy-apk/releases/latest) to install. In-place upgrades require the same application ID; earlier IDs need the setup described above. Each release includes a SHA-256 checksum file. The APK uses a non-debuggable release build and retains the signing certificate used by earlier versions.
 
+A Google Play release is in preparation with a US$0.99 one-time price. Its store signing identity differs from the GitHub APK, so installations signed with different certificates cannot upgrade each other. See the [Google Play guide](docs/google-play.md) (Chinese).
+
 ## Quick start
 
 The client requires Android 8.0+. Remote audio playback requires Android 11+ on the remote device; other capabilities depend on the remote OS, codecs and vendor permissions.
@@ -29,7 +31,7 @@ Once connected, interact with the remote screen directly. The keyboard icon open
 
 ## Build
 
-Install JDK 11, Python 3.8+, Android SDK 31, NDK 28.0.13004108 and CMake 3.31.6, configure `JAVA_HOME` and `ANDROID_HOME`, then run:
+Install JDK 17+ (21 was used for this release), Python 3.8+, Android SDK 36, NDK 28.0.13004108 and CMake 3.31.6, configure `JAVA_HOME` and `ANDROID_HOME`, then run:
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug

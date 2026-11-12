@@ -13,6 +13,7 @@
 | 修改声音、麦克风或远端旋转 | [架构与约束](docs/architecture.md)、[验证指南](docs/testing.md) | `AudioForwarder`、`MicForwarder`、`MicServer`、`RemoteDeviceSettings` |
 | 准备开发环境、构建 | [开发指南](docs/development.md) | `app/build.gradle`、`scripts/prepare-server.sh` |
 | 调查连接、设备、声音故障 | [排障指南](docs/troubleshooting.md) | 按日志标签定位 |
+| Google Play 上架 | [Google Play 指南](docs/google-play.md)、[发布指南](docs/release.md) | `play/`、`app/build.gradle`、商店签名配置 |
 | 交付 APK、签名、依赖升级 | [发布指南](docs/release.md)、[第三方说明](third_party/README.md) | 构建配置、下载脚本、许可文件 |
 | 更新文档、查历史证据 | [文档索引与维护规则](docs/README.md)、[验证记录索引](docs/validation/README.md) | 当前主题文档与对应版本记录 |
 
@@ -40,7 +41,7 @@
 
 ## 验证与交付
 
-在已经配置好 JDK 11 和 Android SDK 的环境中：
+在已经配置好 JDK 17+ 和 Android SDK 36 的环境中：
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug

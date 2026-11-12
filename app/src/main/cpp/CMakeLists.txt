@@ -3,7 +3,7 @@ project(scrcpy_adb_crypto LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 get_filename_component(REPO "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
 add_compile_options("-ffile-prefix-map=${REPO}=.")
-# Compile BoringSSL separately: AGP 7 cannot model its multi-object FIPS target.
+# Import separately compiled BoringSSL archives; do not model its FIPS object targets in AGP.
 foreach(component ssl crypto)
     add_library(${component} STATIC IMPORTED)
     set_target_properties(${component} PROPERTIES IMPORTED_LOCATION "${REPO}/build/boringssl/${ANDROID_ABI}/lib${component}.a")

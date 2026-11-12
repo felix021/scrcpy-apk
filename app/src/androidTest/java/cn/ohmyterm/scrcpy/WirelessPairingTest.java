@@ -33,7 +33,14 @@ public final class WirelessPairingTest extends Instrumentation {
     @Override public void onCreate(Bundle arguments){args=arguments;start();}
     @Override public void onStart(){
         Bundle result=new Bundle();int exit=Activity.RESULT_OK;
-        try{runChecks(result);}catch(Throwable error){exit=Activity.RESULT_CANCELED;result.putString("stream","FAIL: "+error+"\n");}
+        try{runChecks(result);}catch(Throwable error){
+            exit=Activity.RESULT_CANCELED;
+            java.io.StringWriter trace=new java.io.StringWriter();error.printStackTrace(new java.io.PrintWriter(trace));
+            result.putString("stream","FAIL: "+trace);
+            try(java.io.FileOutputStream out=getTargetContext().openFileOutput("wireless-failure.png",0)){
+                getUiAutomation().takeScreenshot().compress(Bitmap.CompressFormat.PNG,100,out);
+            }catch(Exception ignored){}
+        }
         finish(exit,result);
     }
     private void runChecks(Bundle result) throws Exception {
@@ -42,6 +49,7 @@ public final class WirelessPairingTest extends Instrumentation {
             getTargetContext().getSharedPreferences("connections",0).edit().putString("language",args.getString("language","en")).putString("localName","Before pairing").commit();
             activity=startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             click("app_settings");set("local_device_name","My Android Client");waitText(UiText.format(R.string.pair_name_preview,"My_Android_Client"),5000);click("app_settings_done");
+            capture("form");
             String mode=args.getString("mode","code");
             if(mode.equals("classic")){
                 setDescription(UiText.text(R.string.device_ip_hostname),args.getString("host"));setDescription(UiText.text(R.string.adb_port),args.getString("connectPort"));
@@ -81,15 +89,7 @@ public final class WirelessPairingTest extends Instrumentation {
                 register("adb-test-connect","_adb-tls-connect._tcp.",connection.server.getLocalPort());
                 waitStatus("Pairing…",10000);
                 JSONObject challenge=new JSONObject();challenge.put("payload",payload);
-                java.net.URI bridge=java.net.URI.create(args.getString("bridge"));
-                try(Socket http=new Socket()){
-                    http.connect(new InetSocketAddress(bridge.getHost(),bridge.getPort()),10000);http.setSoTimeout(20000);
-                    byte[] request=challenge.toString().getBytes(StandardCharsets.UTF_8);
-                    String header="POST /qr HTTP/1.0\r\nHost: test-relay\r\nContent-Length: "+request.length+"\r\n\r\n";
-                    http.getOutputStream().write(header.getBytes(StandardCharsets.US_ASCII));http.getOutputStream().write(request);http.getOutputStream().flush();
-                    String status=new java.io.BufferedReader(new java.io.InputStreamReader(http.getInputStream(),StandardCharsets.US_ASCII)).readLine();
-                    require(status!=null && status.contains(" 200 "),"Android QR server setup");
-                }
+                bridgeRequest("/qr",challenge.toString().getBytes(StandardCharsets.UTF_8));
                 pairing.ready.countDown();
                 waitStatus("Paired successfully",45000);
                 waitValue("pair_connect_port",String.valueOf(connection.server.getLocalPort()),10000);
@@ -102,12 +102,33 @@ public final class WirelessPairingTest extends Instrumentation {
                 }
                 waitStatus("Paired successfully",45000);set("pair_connect_port",args.getString("connectPort"));
             }
-            click("pair_action");waitText("● Connected",60000);click("runtime_settings");click("runtime_disconnect");click("disconnect_confirm");waitID("pair_open",15000);
-            result.putString("stream","PASS: "+mode+" pairing, TLS video first frame, runtime controls and disconnect\n");
+            click("pair_action");waitText("● Connected",60000);
+            capture("remote");
+            if(Boolean.parseBoolean(args.getString("screenshots","false"))){
+                AccessibilityNodeInfo keyboard=description(getUiAutomation().getRootInActiveWindow(),UiText.text(R.string.virtual_keyboard));
+                require(keyboard!=null && keyboard.performAction(AccessibilityNodeInfo.ACTION_CLICK),"Open virtual keyboard");Thread.sleep(700);capture("keyboard");
+                keyboard=description(getUiAutomation().getRootInActiveWindow(),UiText.text(R.string.virtual_keyboard));keyboard.performAction(AccessibilityNodeInfo.ACTION_CLICK);Thread.sleep(400);
+                click("runtime_settings");capture("settings");click("runtime_done");
+            }
+            bridgeRequest("/back-ready",new byte[0]);
+            Thread.sleep(700);sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);Thread.sleep(500);
+            waitText("● Connected",5000);
+            click("runtime_settings");click("runtime_disconnect");click("disconnect_confirm");waitID("pair_open",15000);
+            result.putString("stream","PASS: "+mode+" pairing, TLS video first frame, system Back forwarding, runtime controls and disconnect\n");
         }finally{
             NsdManager manager=(NsdManager)getTargetContext().getSystemService(android.content.Context.NSD_SERVICE);
             for(NsdManager.RegistrationListener listener:registrations)try{manager.unregisterService(listener);}catch(RuntimeException ignored){}
             for(Relay relay:relays)relay.close();
+        }
+    }
+    private void bridgeRequest(String path,byte[] request) throws Exception {
+        java.net.URI bridge=java.net.URI.create(args.getString("bridge"));
+        try(Socket http=new Socket()){
+            http.connect(new InetSocketAddress(bridge.getHost(),bridge.getPort()),10000);http.setSoTimeout(20000);
+            String header="POST "+path+" HTTP/1.0\r\nHost: test-relay\r\nContent-Length: "+request.length+"\r\n\r\n";
+            http.getOutputStream().write(header.getBytes(StandardCharsets.US_ASCII));http.getOutputStream().write(request);http.getOutputStream().flush();
+            String status=new java.io.BufferedReader(new java.io.InputStreamReader(http.getInputStream(),StandardCharsets.US_ASCII)).readLine();
+            require(status!=null && status.contains(" 200 "),"Owned test bridge "+path);
         }
     }
     private AccessibilityNodeInfo id(String id){AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();if(root==null)return null;List<AccessibilityNodeInfo> nodes=root.findAccessibilityNodeInfosByViewId("cn.ohmyterm.scrcpy:id/"+id);return nodes.isEmpty()?null:nodes.get(0);}
@@ -121,7 +142,19 @@ public final class WirelessPairingTest extends Instrumentation {
     private AccessibilityNodeInfo description(AccessibilityNodeInfo node,String description){if(node==null)return null;if(node.getContentDescription()!=null && description.contentEquals(node.getContentDescription()))return node;for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo child=description(node.getChild(i),description);if(child!=null)return child;}return null;}
     private void waitValue(String id,String value,long timeout) throws Exception {long end=System.currentTimeMillis()+timeout;do{AccessibilityNodeInfo n=id(id);if(n!=null && value.contentEquals(n.getText()))return;Thread.sleep(150);}while(System.currentTimeMillis()<end);throw new AssertionError("Discovered connection port missing; expected "+value+", actual "+(id(id)==null?"no field":id(id).getText()));}
     private boolean hasText(String text){AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();return root!=null && !root.findAccessibilityNodeInfosByText(text).isEmpty();}
-    private void waitText(String text,long timeout) throws Exception {long end=System.currentTimeMillis()+timeout;do{if(hasText(text))return;Thread.sleep(200);}while(System.currentTimeMillis()<end);throw new AssertionError("UI text missing: "+text);}
+    private void waitText(String text,long timeout) throws Exception {long end=System.currentTimeMillis()+timeout;do{
+        AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();
+        if(root!=null)for(AccessibilityNodeInfo n:root.findAccessibilityNodeInfosByText("Got it")){
+            if("com.android.systemui".contentEquals(n.getPackageName()==null?"":n.getPackageName()))n.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        }
+        if(hasText(text))return;Thread.sleep(200);
+    }while(System.currentTimeMillis()<end);throw new AssertionError("UI text missing: "+text);}
+    private void capture(String name) throws Exception {
+        if(!Boolean.parseBoolean(args.getString("screenshots","false")))return;Thread.sleep(700);
+        try(java.io.FileOutputStream out=getTargetContext().openFileOutput("store-"+args.getString("language","en")+"-"+name+".png",0)){
+            getUiAutomation().takeScreenshot().compress(Bitmap.CompressFormat.PNG,100,out);
+        }
+    }
     private void waitStatus(String text,long timeout) throws Exception {long end=System.currentTimeMillis()+timeout;do{AccessibilityNodeInfo n=id("pair_status");if(n!=null && n.getText()!=null && n.getText().toString().startsWith(text))return;Thread.sleep(200);}while(System.currentTimeMillis()<end);throw new AssertionError("Pairing status missing: "+text);}
     private static void require(boolean value,String message){if(!value)throw new AssertionError(message);}
     private void register(String name,String type,int port) throws Exception {
