@@ -8,7 +8,11 @@
 
 使用所有者确认的 Google Play 开发者账号，不因参考了其他项目的构建环境就切换账号。使用服务账号前先确认其能访问同账号下的已知 App。
 
-首次 App 创建、付费类型、Google Play App Signing 初始化和首个 AAB 绑定包名需在 Play Console 网页确认。API 的 `Package not found` 既可能表示没有创建，也可能表示网页草稿尚未上传首包，不能直接要求重复创建。
+首次 App 创建和付费类型在 Play Console 网页确认；创建页要求包名时填写 `cn.ohmyterm.scrcpy`。不要仅凭 API 的 `Package not found` 就重复创建 App，先核对网页记录、包名和服务账号的应用权限。
+
+新 App 不会自动继承同账号下其他 App 的服务账号权限。上传前先核对凭据和本 App 的查看、草稿、商店资料、政策声明及测试 / 生产发布权限；能够访问参考 App 不代表能访问本 App。`users.list` 需传 `pageSize=-1`。App 管理员仅获某个旧 App 的权限时，不能替自己授予新 App 权限。
+
+App 建立且权限到位后，可以通过 API 上传首个 AAB，本项目 1.2.0 已验证该路径。Google Play App Signing 按控制台与 API 的实际要求配置，不预先假定首包必须手工上传。
 
 选择「应用」、默认语言 English (United States)、付费，并设置美国基础价 USD 0.99；其他地区按实际发行计划配置。不要先以免费正式发布占位，再尝试改成付费。所有者自行核对开发者验证、收款和适用协议。
 
@@ -60,5 +64,7 @@ Google Play Data safety 的「收集」定义和 Apple 不完全相同，不能�
 首包绑定后，使用同账号的 Developer API 完成 edit、上传 AAB、更新多语言文案 / 图像、轨道与 validate，再按当前授权 commit。每次保存 edit ID、versionCode、包哈希和轨道状态；写入超时先查询结果，避免重复上传。
 
 先验证内部测试或控制台要求的测试轨道，再推进正式生产审核。创建 edit 或把 release 标为 draft 不代表已提审；以 Play Console 的审核状态和实际商店页面为准。正式在售后再添加 Google Play 下载链接，不能提前放虚假的链接。
+
+提交 edit 前先 validate，提交后创建新 edit 回读构建哈希、轨道状态、文案与图片数量，再删除这个只读检查的 edit。首次准备保存 `internal` 的 `draft`，不自动邀请测试人员。使用 `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 避免取消已有审核。`changesNotSentForReview` 不能一律设为 true：本项目首次草稿提交时 Google 明确要求不传该参数；按实际错误修正，不能把参数名当作未提审的证据。
 
 参考：[创建应用](https://support.google.com/googleplay/android-developer/answer/9859152)、[目标 API 要求](https://support.google.com/googleplay/android-developer/answer/11926878)、[16 KB 页面](https://developer.android.com/guide/practices/page-sizes)、[Data safety](https://support.google.com/googleplay/android-developer/answer/10787469)、[Developer API](https://developers.google.com/android-publisher/api-ref/rest)。
