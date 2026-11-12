@@ -76,3 +76,11 @@ Google Play Data safety 的「收集」定义和 Apple 不完全相同，不能�
 Data safety CSV 必须清空官方样例自带的示例答案，再按真实代码填写。官方旧样例缺少当前必填的账号创建问题；本 App 的回答为 `PSL_SUPPORTED_ACCOUNT_CREATION_METHODS / PSL_ACM_NONE`，没有外部账号登录。旧的 `PSL_DATA_COLLECTION_USER_REQUEST_DELETE` 已从新表单移除，不能照抄旧模板。只用当前表单支持的问答组合，API 400 时先查格式与遗漏，不能改成不真实的业务答案以求通过。
 
 本轮声明包含设备间的画面、录音、控制交互、发送文本与 ADB 身份标识，目的仅为应用功能；音频 / 交互可关闭，输入文字及远端授权标识不能一律视为即时删除。声明按用户主动的设备传输处理第三方共享豁免，不申报广告或统计分析用途。传统 TCP 路径不加密，因此没有声明全部传输均加密。详细 CSV 和 API 回执保存在私有配置，HTTP 204 仅证明已接受声明，不代表生产审核通过。
+
+## 首次测试与提交
+
+完成 Console 表单后，App 本身仍可能处于 Draft。此时轨道更新返回 200 也不代表可激活：必须继续 validate；本项目首次生产激活在校验时收到 `Only releases with status draft may be created on draft app.`。遇到这个明确限制时，先把目标轨道保存为 `draft`，从 Console 完成首次提交，不反复上传相同构建或把草稿说成审核中。
+
+查询实际审核进度使用 `applications.tracks.releases.list` 的 `releaseLifecycleState`，区分 DRAFT、NOT_SENT_FOR_REVIEW、IN_REVIEW 和已发布；不能用编辑轨道的 `completed` 代替审核结论。空集合接口可能返回 HTTP 204，应按没有返回记录处理，不直接解析空 JSON。
+
+默认封闭测试轨道为 `alpha`。测试者使用手机 Play 商店的同一个 Google 账号加入测试。公开 `edits.testers` 只支持 Google Groups，不能读取或编辑 Console 的个人邮箱名单；不要据 `{}` 判断网页邮箱名单一定为空。邮箱名单和首次加入链接从 Console 的 Testers 页管理。付费 App 的封闭测试沿用付费价格；测试资格与开发者 / 服务账号 API 权限是两回事。
