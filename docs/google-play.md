@@ -84,3 +84,5 @@ Data safety CSV 必须清空官方样例自带的示例答案，再按真实代�
 查询实际审核进度使用 `applications.tracks.releases.list` 的 `releaseLifecycleState`，区分 DRAFT、NOT_SENT_FOR_REVIEW、IN_REVIEW 和已发布；不能用编辑轨道的 `completed` 代替审核结论。空集合接口可能返回 HTTP 204，应按没有返回记录处理，不直接解析空 JSON。
 
 默认封闭测试轨道为 `alpha`。测试者使用手机 Play 商店的同一个 Google 账号加入测试。公开 `edits.testers` 只支持 Google Groups，不能读取或编辑 Console 的个人邮箱名单；不要据 `{}` 判断网页邮箱名单一定为空。邮箱名单和首次加入链接从 Console 的 Testers 页管理。付费 App 的封闭测试沿用付费价格；测试资格与开发者 / 服务账号 API 权限是两回事。
+
+封测地区必须单独核对。App 的 Setup 项目完成、AAB 已上传，都不能证明 Alpha 已有地区。本项目首次封测的直接阻塞是 Alpha 为 0 个国家 / 地区，预览页报 `No countries or regions have been selected for this track`。按用户指定范围保存地区后，用 `edits.countryavailability.get` 回读该轨道；本轮确认 173 个地区，并保持与生产轨道分开管理。之后还需在预览页 Save，再到 Publishing overview 执行 Send changes for review。完成后同时核对页面 Changes in review 和 API 的 IN_REVIEW；仅保存轨道草稿不算完成提交。
