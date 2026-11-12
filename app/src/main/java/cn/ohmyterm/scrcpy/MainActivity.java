@@ -435,7 +435,8 @@ public final class MainActivity extends Activity {
         TextView version=label(UiText.format(R.string.app_version,BuildConfig.VERSION_NAME,BuildConfig.VERSION_CODE),13,TEXT);version.setId(R.id.app_version);
         add(body,version,-2);gap(body,8);add(body,label(UiText.text(R.string.app_license),12,MUTED),-2);gap(body,18);
         add(body,settingsLink(R.string.project_homepage,"https://scrcpy.oh-my-term.cn/",R.id.homepage_link),-2);gap(body,12);
-        add(body,settingsLink(R.string.code_repository,"https://github.com/moteng-network/scrcpy-apk",R.id.repository_link),-2);
+        add(body,settingsLink(R.string.code_repository,"https://github.com/moteng-network/scrcpy-apk",R.id.repository_link),-2);gap(body,12);
+        add(body,settingsLink(R.string.privacy_policy,"https://scrcpy.oh-my-term.cn/privacy.html",R.id.privacy_link),-2);
         LinearLayout actions=row();Button done=button(UiText.text(R.string.done),true);done.setId(R.id.app_settings_done);configAction(actions,done,1,true);
         LinearLayout content=editorPanel(body,actions);ScrollView scroll=(ScrollView)content.getChildAt(0);
         scroll.setId(R.id.app_settings_scroll);scroll.setScrollbarFadingEnabled(false);scroll.setVerticalFadingEdgeEnabled(true);scroll.setFadingEdgeLength(dp(16));

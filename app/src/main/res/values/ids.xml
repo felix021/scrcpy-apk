@@ -5,6 +5,7 @@
     <item name="app_version" type="id"/>
     <item name="homepage_link" type="id"/>
     <item name="repository_link" type="id"/>
+    <item name="privacy_link" type="id"/>
 
     <item name="transport_picker" type="id"/>
     <item name="usb_device" type="id"/>

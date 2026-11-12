@@ -1018,6 +1018,7 @@ def verify_app_settings():
     assert find(text='开源许可 · GPL-3.0',root=root) is not None
     link=scroll_to('repository_link')
     assert link.get('content-desc')=='代码仓库 · https://github.com/moteng-network/scrcpy-apk'
+    assert scroll_to('privacy_link').get('content-desc')=='隐私政策 · https://scrcpy.oh-my-term.cn/privacy.html'
     screenshot('81-app-settings-zh');click(find(rid='app_settings_done'))
     edit('设备 IP / 主机名','draft-phone.example');edit('最长边 · px','1')
     form_language('English')
@@ -1025,6 +1026,7 @@ def verify_app_settings():
     assert find(desc='Max edge · px').get('text')=='1'
     open_settings();assert find(text='About') is not None
     assert find(rid='app_version').get('text')==f'Version {version} ({code})'
+    assert scroll_to('privacy_link').get('content-desc')=='Privacy policy · https://scrcpy.oh-my-term.cn/privacy.html'
     screenshot('82-app-settings-en');click(find(rid='app_settings_done'))
     shell(a.client,'am','force-stop',PKG);shell(a.client,'am','start','-n',PKG+'/.MainActivity')
     assert find(text='Remote control') is not None
@@ -1040,16 +1042,16 @@ def verify_app_settings():
         root=dump();done=bounds(find(rid='app_settings_done',root=root))
         dims=list(map(int,re.findall(r'\d+',shell(a.client,'wm','size'))))
         assert done[2]>done[0] and done[3]>done[1] and done[2]<=max(dims) and done[3]<=min(dims)
-        link=scroll_to('repository_link');screenshot('83-app-settings-landscape-'+str(orientation))
-        assert bounds(link)[3]<=done[1], 'Repository overlaps fixed dialog footer'
+        link=scroll_to('privacy_link');screenshot('83-app-settings-landscape-'+str(orientation))
+        assert bounds(link)[3]<=done[1], 'Privacy policy overlaps fixed dialog footer'
     shell(a.client,'settings','put','system','user_rotation',0);time.sleep(.6)
-    link=scroll_to('repository_link');click(link)
+    link=scroll_to('privacy_link');click(link)
     activities=shell(a.client,'dumpsys','activity','activities')
-    assert 'android.intent.action.VIEW' in activities and 'https://github.com/moteng-network/scrcpy-apk' in activities
+    assert 'android.intent.action.VIEW' in activities and 'https://scrcpy.oh-my-term.cn/privacy.html' in activities
     shell(a.client,'am','start','-n',PKG+'/.MainActivity');time.sleep(.5)
     click(find(rid='app_settings_done'));open_settings();shell(a.client,'input','keyevent','KEYCODE_BACK')
     assert find(rid='app_settings_done') is None and find(rid='app_settings') is not None
-    record('settings stays usable in both landscape directions, keeps its close action visible, opens the exact repository URL in a browser and handles Back')
+    record('settings stays usable in both landscape directions, keeps its close action visible, opens the exact privacy policy URL in a browser and handles Back')
     top();click(find(rid='transport_picker'));click(find(desc='网络 ADB'))
     edit('设备 IP / 主机名',a.host);edit('ADB 端口',str(a.port))
 

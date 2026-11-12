@@ -2,7 +2,7 @@
 
 [文档索引](README.md) · [发布指南](release.md) · [商店资料](../play/README.md)
 
-当前准备首个 Google Play 版本 **1.2.0 / versionCode 17**，包名 `cn.ohmyterm.scrcpy`，计划一次购买 **US$0.99**，无订阅或 App 内购买。源码继续 GPL-3.0。构建完成不代表已经上传、提审或在售，实际状态记录在私有发布配置。
+当前准备首个 Google Play 版本 **1.2.0 / versionCode 18**，包名 `cn.ohmyterm.scrcpy`，计划一次购买 **US$0.99**，无订阅或 App 内购买。源码继续 GPL-3.0。构建完成不代表已经上传、提审或在售，实际状态记录在私有发布配置。
 
 ## 首次创建与账号
 
@@ -53,7 +53,7 @@ GitHub Release APK 保持原签名。不同签名的同包名安装不能直接�
 
 ## 隐私和内容声明
 
-隐私 URL 为 <https://scrcpy.oh-my-term.cn/privacy.html>。麦克风默认关闭，主动开启时才请求权限；不加入广告、分析或订阅 SDK。
+隐私 URL 为 <https://scrcpy.oh-my-term.cn/privacy.html>，应用「设置 → 关于 → 隐私政策」可直接打开同一地址。麦克风默认关闭，主动开启时才请求权限；不加入广告、分析或订阅 SDK。
 
 Google Play Data safety 的「收集」定义和 Apple 不完全相同，不能直接沿用 iOS 答案。本 App 有设备直连、麦克风与输入传输；需分别核对用户授权的设备间传输、临时内存处理、TLS / 传统 TCP 等路径，不能把所有连接都宣称为加密。按当前模板完成真实答案，服务账号也可通过 `applications.dataSafety` 提交 CSV；首次申报和模板不明确时先由所有者核对网页。
 
@@ -68,3 +68,11 @@ Google Play Data safety 的「收集」定义和 Apple 不完全相同，不能�
 提交 edit 前先 validate，提交后创建新 edit 回读构建哈希、轨道状态、文案与图片数量，再删除这个只读检查的 edit。首次准备保存 `internal` 的 `draft`，不自动邀请测试人员。使用 `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 避免取消已有审核。`changesNotSentForReview` 不能一律设为 true：本项目首次草稿提交时 Google 明确要求不传该参数；按实际错误修正，不能把参数名当作未提审的证据。
 
 参考：[创建应用](https://support.google.com/googleplay/android-developer/answer/9859152)、[目标 API 要求](https://support.google.com/googleplay/android-developer/answer/11926878)、[16 KB 页面](https://developer.android.com/guide/practices/page-sizes)、[Data safety](https://support.google.com/googleplay/android-developer/answer/10787469)、[Developer API](https://developers.google.com/android-publisher/api-ref/rest)。
+
+## API 与网页的边界
+
+当前公开 Developer API 可写 AAB、轨道、商店文案 / 图片、联系信息和 `applications.dataSafety` 的 CSV 声明。隐私政策 URL、登录说明、广告、分级、目标受众、政府 / 金融 / 健康声明、Trader status、应用分类、商家账号和付费应用售价没有对应的公开写入接口；不要把应用内商品定价接口用于应用下载价格，也不要把面向第三方应用商店的 `appstoreappsreview` 当作 Play Console 问卷接口。
+
+Data safety CSV 必须清空官方样例自带的示例答案，再按真实代码填写。官方旧样例缺少当前必填的账号创建问题；本 App 的回答为 `PSL_SUPPORTED_ACCOUNT_CREATION_METHODS / PSL_ACM_NONE`，没有外部账号登录。旧的 `PSL_DATA_COLLECTION_USER_REQUEST_DELETE` 已从新表单移除，不能照抄旧模板。只用当前表单支持的问答组合，API 400 时先查格式与遗漏，不能改成不真实的业务答案以求通过。
+
+本轮声明包含设备间的画面、录音、控制交互、发送文本与 ADB 身份标识，目的仅为应用功能；音频 / 交互可关闭，输入文字及远端授权标识不能一律视为即时删除。声明按用户主动的设备传输处理第三方共享豁免，不申报广告或统计分析用途。传统 TCP 路径不加密，因此没有声明全部传输均加密。详细 CSV 和 API 回执保存在私有配置，HTTP 204 仅证明已接受声明，不代表生产审核通过。

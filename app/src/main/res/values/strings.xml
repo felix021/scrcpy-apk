@@ -190,4 +190,5 @@
     <string name="pairing_in_progress">Pairing…</string>
     <string name="pair_success">Paired successfully</string>
     <string name="pair_failed">Pairing failed. Check the address and code and keep the remote pairing window open. For QR pairing, refresh and try again.</string>
+    <string name="privacy_policy">Privacy policy</string>
 </resources>

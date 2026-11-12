@@ -190,4 +190,5 @@
     <string name="pairing_in_progress">正在配对…</string>
     <string name="pair_success">配对成功</string>
     <string name="pair_failed">配对失败。请检查地址和配对码，并保持远端配对窗口打开；二维码模式可刷新后重试。</string>
+    <string name="privacy_policy">隐私政策</string>
 </resources>
